@@ -1,0 +1,23 @@
+{
+  "buildCommand": "npm run build",
+  "outputDirectory": "dist",
+  "framework": "vite",
+  "rewrites": [
+    {
+      "source": "/api/users/create",
+      "destination": "/api/users/create"
+    },
+    {
+      "source": "/api/users/:id/reset-password",
+      "destination": "/api/users/[id]"
+    },
+    {
+      "source": "/api/users/:id",
+      "destination": "/api/users/[id]"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}

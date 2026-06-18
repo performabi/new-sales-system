@@ -31,7 +31,7 @@ interface AppState {
   }) => Promise<{ error: string | null }>;
   updateUser: (id: string, data: Partial<UserProfile>) => Promise<{ error: string | null }>;
   deleteUser: (id: string) => Promise<{ error: string | null }>;
-  resetUserPassword: (id: string) => Promise<{ error: string | null }>;
+  resetUserPassword: (id: string, newPassword?: string) => Promise<{ error: string | null }>;
 
   // Inventory
   inventory: InventoryItem[];
@@ -224,18 +224,22 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  resetUserPassword: async (id) => {
+  resetUserPassword: async (id, newPassword?: string) => {
     try {
       const response = await fetch(`/api/users/${id}/reset-password`, {
         method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ newPassword: newPassword || null }),
       });
       const result = await response.json();
       if (!response.ok) {
+        get().addToast('error', result.error || 'Failed to reset password');
         return { error: result.error || 'Failed to reset password' };
       }
       get().addToast('success', 'Password reset to Sales12345');
       return { error: null };
     } catch (err) {
+      get().addToast('error', (err as Error).message);
       return { error: (err as Error).message };
     }
   },
