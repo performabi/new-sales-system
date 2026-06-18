@@ -244,7 +244,6 @@ export default function Users() {
                 onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, ''))}
                 required={!isEditMode}
                 placeholder={isEditMode ? "(Unchanged)" : "e.g. 1234"}
-                disabled={isEditMode} // Disable PIN editing for now unless implemented via server
               />
             </div>
           </div>
