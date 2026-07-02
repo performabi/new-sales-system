@@ -489,6 +489,69 @@ a:hover { color: var(--primary-hover); }
   animation: fadeIn var(--transition-base) ease-out;
 }
 
+/* ---------- Filter Bar ---------- */
+.filter-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 24px;
+  padding: 16px 20px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+.filter-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  min-width: 180px;
+}
+
+.filter-group.filter-search {
+  flex: 1;
+  min-width: 220px;
+}
+
+.filter-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* ---------- Checkbox Label ---------- */
+.checkbox-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 10px 14px;
+  border: 1.5px solid var(--border-input);
+  border-radius: var(--radius-md);
+  background: var(--bg-input);
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  transition: all var(--transition-fast);
+  user-select: none;
+}
+
+.checkbox-label:hover {
+  border-color: var(--border-input-focus);
+  background: #fff;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+
 /* ---------- Stats Grid ---------- */
 .stats-grid {
   display: grid;

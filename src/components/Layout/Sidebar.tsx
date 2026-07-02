@@ -4,11 +4,16 @@ import { useAuthStore } from '../../store/authStore';
 import { useAppStore } from '../../store/appStore';
 import './Sidebar.css';
 
-const NAV_ITEMS = [
+const MAIN_NAV_ITEMS = [
   { path: '/',          icon: '📊', label: 'Dashboard' },
   { path: '/stores',    icon: '🏪', label: 'Stores' },
+  { path: '/plu',       icon: '🏷️',  label: 'PLU' },
   { path: '/users',     icon: '👥', label: 'Users' },
   { path: '/inventory', icon: '📦', label: 'Inventory' },
+];
+
+const SETUP_NAV_ITEMS = [
+  { path: '/setup/categories', icon: '🗂️', label: 'Categories' },
 ];
 
 export default function Sidebar() {
@@ -21,6 +26,9 @@ export default function Sidebar() {
     await signOut();
     navigate('/login');
   };
+
+  const isActive = (path: string) =>
+    path === '/' ? location.pathname === '/' : location.pathname.startsWith(path);
 
   return (
     <aside className={`sidebar ${sidebarCollapsed ? 'collapsed' : ''}`}>
@@ -40,20 +48,46 @@ export default function Sidebar() {
         <div className="sidebar-brand">
           <span className="brand-icon">🏢</span>
           {!sidebarCollapsed && (
-            <div className="brand-text">
+            <div className="brand-text" style={{ display: 'flex', flexDirection: 'column' }}>
               <span className="brand-title">HEAD OFFICE</span>
-              <span className="brand-user">{profile?.full_name ?? 'Loading…'}</span>
+              <span className="brand-user" style={{ fontWeight: 600 }}>{profile?.full_name ?? 'Loading…'}</span>
+              <span className="brand-role" style={{
+                fontSize: '0.72rem',
+                color: 'var(--text-muted)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+                marginTop: '2px'
+              }}>
+                {profile?.role?.replace('_', ' ') ?? ''}
+              </span>
             </div>
           )}
         </div>
       </div>
 
-      {/* Navigation */}
+      {/* Main Navigation */}
       <nav className="sidebar-nav">
-        {NAV_ITEMS.map((item) => (
+        {MAIN_NAV_ITEMS.map((item) => (
           <button
             key={item.path}
-            className={`nav-item ${location.pathname === item.path ? 'active' : ''}`}
+            className={`nav-item ${isActive(item.path) ? 'active' : ''}`}
+            onClick={() => navigate(item.path)}
+            title={sidebarCollapsed ? item.label : undefined}
+          >
+            <span className="nav-icon">{item.icon}</span>
+            {!sidebarCollapsed && <span className="nav-label">{item.label}</span>}
+          </button>
+        ))}
+
+        {/* ── Setup Section ── */}
+        {!sidebarCollapsed && (
+          <div className="sidebar-section-label">Setup</div>
+        )}
+        {sidebarCollapsed && <div className="sidebar-section-divider" />}
+        {SETUP_NAV_ITEMS.map((item) => (
+          <button
+            key={item.path}
+            className={`nav-item ${isActive(item.path) ? 'active' : ''}`}
             onClick={() => navigate(item.path)}
             title={sidebarCollapsed ? item.label : undefined}
           >

@@ -56,55 +56,17 @@ export function apiPlugin(): Plugin {
             assigned_store_id: assigned_store_id || null,
           });
 
-          // If profile insert fails, rollback auth user creation
-          if (profileError) {
-            await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
-            return res.status(400).json({ error: profileError.message });
+                      if (profileError) {
+              await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
+              return res.status(400).json({ error: profileError.message });
+            }
+
+            return res.json({ success: true, user_id: authData.user.id });
+          } catch (err) {
+            console.error('Server error creating user:', err);
+            return res.status(500).json({ error: 'Internal server error' });
           }
-
-          return res.json({ success: true, user_id: authData.user.id });
-        } catch (err) {
-          console.error('Server error creating user:', err);
-          return res.status(500).json({ error: 'Internal server error' });
-        }
-      });
-
-      // Admin route to reset password — MUST be registered BEFORE the generic PUT /api/users/:id
-      // to prevent Express matching "reset-password" as the :id param
-      app.put('/api/users/:id/reset-password', async (req, res) => {
-        try {
-          const { id } = req.params;
-          const newPassword: string | undefined = (req.body || {}).newPassword;
-          const env = loadEnv(server.config.mode, process.cwd(), '');
-
-          const supabaseUrl = env.VITE_SUPABASE_URL || '';
-          const serviceRole = env.SERVICE_ROLE || '';
-
-          if (!supabaseUrl || !serviceRole) {
-            return res.status(500).json({ error: 'Missing Supabase admin credentials on server.' });
-          }
-
-          const supabaseAdmin = createClient(supabaseUrl, serviceRole, {
-            auth: { autoRefreshToken: false, persistSession: false },
-          });
-
-          const password = newPassword || 'Sales12345';
-          const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(id, { password });
-          if (authError) return res.status(400).json({ error: authError.message });
-
-          const { error: profileError } = await supabaseAdmin
-            .from('users')
-            .update({ requires_password_change: true })
-            .eq('user_id', id);
-          if (profileError) return res.status(400).json({ error: profileError.message });
-
-          return res.json({ success: true, passwordSet: !!newPassword });
-        } catch (err) {
-          console.error('Server error resetting password:', err);
-          return res.status(500).json({ error: 'Internal server error' });
-        }
-      });
-
+        });
       // Admin route to update users (generic — registered AFTER the specific reset-password route)
       app.put('/api/users/:id', async (req, res) => {
         try {
@@ -179,7 +141,79 @@ export function apiPlugin(): Plugin {
         }
       });
 
-      // Mount Express app onto Vite's dev server
+     // Admin route to create PLU category
+app.post('/api/plu_categories/create', async (req, res) => {
+  try {
+    const { name, created_by } = req.body;
+    const env = loadEnv(server.config.mode, process.cwd(), '');
+    const supabaseUrl = env.VITE_SUPABASE_URL || '';
+    const serviceRole = env.SERVICE_ROLE || '';
+    if (!supabaseUrl || !serviceRole) {
+      return res.status(500).json({ error: 'Missing Supabase admin credentials on server.' });
+    }
+    const supabaseAdmin = createClient(supabaseUrl, serviceRole, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const { data, error } = await supabaseAdmin.from('plu_categories').insert({ name, created_by }).select().single();
+    if (error) return res.status(400).json({ error: error.message });
+    return res.json({ success: true, category: data });
+  } catch (err) {
+    console.error('Server error creating PLU category:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Admin route to update PLU category
+app.put('/api/plu_categories/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { name } = req.body;
+    const env = loadEnv(server.config.mode, process.cwd(), '');
+    const supabaseUrl = env.VITE_SUPABASE_URL || '';
+    const serviceRole = env.SERVICE_ROLE || '';
+    if (!supabaseUrl || !serviceRole) {
+      return res.status(500).json({ error: 'Missing Supabase admin credentials on server.' });
+    }
+    const supabaseAdmin = createClient(supabaseUrl, serviceRole, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const { error } = await supabaseAdmin.from('plu_categories').update({ name }).eq('category_id', id);
+    if (error) return res.status(400).json({ error: error.message });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Server error updating PLU category:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Admin route to delete PLU category
+app.delete('/api/plu_categories/:id', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const env = loadEnv(server.config.mode, process.cwd(), '');
+    const supabaseUrl = env.VITE_SUPABASE_URL || '';
+    const serviceRole = env.SERVICE_ROLE || '';
+    if (!supabaseUrl || !serviceRole) {
+      return res.status(500).json({ error: 'Missing Supabase admin credentials on server.' });
+    }
+    const supabaseAdmin = createClient(supabaseUrl, serviceRole, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    // Check if any PLU uses this category
+    const { count } = await supabaseAdmin.from('plu').select('plu_id', { count: 'exact', head: true }).eq('category_id', id);
+    if ((count ?? 0) > 0) {
+      return res.status(400).json({ error: 'Cannot delete — category is assigned to PLUs.' });
+    }
+    const { error } = await supabaseAdmin.from('plu_categories').delete().eq('category_id', id);
+    if (error) return res.status(400).json({ error: error.message });
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Server error deleting PLU category:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+// Mount Express app onto Vite's dev server
       server.middlewares.use(app);
     },
   };

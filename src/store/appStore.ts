@@ -1,6 +1,6 @@
 // src/store/appStore.ts
 import { create } from 'zustand';
-import type { Store, UserProfile, InventoryItem, Toast } from '../types';
+import type { Store, UserProfile, InventoryItem, Toast, PluCategory, Plu } from '../types';
 import { getSupabaseClient } from '../lib/supabaseClient';
 
 interface AppState {
@@ -38,6 +38,23 @@ interface AppState {
   inventoryLoading: boolean;
   fetchInventory: () => Promise<void>;
 
+  // PLU Categories
+  pluCategories: PluCategory[];
+  pluCategoriesLoading: boolean;
+  fetchPluCategories: () => Promise<void>;
+  addPluCategory: (name: string) => Promise<{ error: string | null }>;
+  updatePluCategory: (id: string, name: string) => Promise<{ error: string | null }>;
+  deletePluCategory: (id: string) => Promise<{ error: string | null }>;
+
+  // PLU
+  plusItems: Plu[];
+  plusLoading: boolean;
+  fetchPlus: () => Promise<void>;
+  addPlu: (data: Omit<Plu, 'plu_id' | 'created_at' | 'category_name'>) => Promise<{ error: string | null }>;
+  updatePlu: (id: string, data: Partial<Omit<Plu, 'plu_id' | 'created_at' | 'category_name'>>) => Promise<{ error: string | null }>;
+  deletePlu: (id: string) => Promise<{ error: string | null }>;
+  getNextPluNumber: () => Promise<string>;
+
   // Toasts
   toasts: Toast[];
   addToast: (type: Toast['type'], message: string) => void;
@@ -62,7 +79,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const { data, error } = await supabase
         .from('stores')
         .select('*')
-        .order('created_at', { ascending: false });
+        .order('store_number', { ascending: true });
       if (error) throw error;
       set({ stores: (data as Store[]) ?? [] });
     } catch (err) {
@@ -76,14 +93,28 @@ export const useAppStore = create<AppState>((set, get) => ({
   addStore: async (store) => {
     try {
       const supabase = getSupabaseClient();
+      
+      // Calculate next sequential 3-digit store number (e.g. "001", "002"...)
+      const currentStores = get().stores;
+      const numericNumbers = currentStores
+        .map((s) => parseInt(s.store_number || '', 10))
+        .filter((n) => !isNaN(n));
+      const maxNum = numericNumbers.length > 0 ? Math.max(...numericNumbers) : 0;
+      const nextStoreNumber = String(maxNum + 1).padStart(3, '0');
+
+      const storePayload = {
+        ...store,
+        store_number: nextStoreNumber
+      };
+
       const { data, error } = await supabase
         .from('stores')
-        .insert(store)
+        .insert(storePayload)
         .select()
         .single();
       if (error) return { error: error.message };
-      set((s) => ({ stores: [data as Store, ...s.stores] }));
-      get().addToast('success', `Store "${store.name}" created successfully`);
+      set((s) => ({ stores: [data as Store, ...s.stores].sort((a, b) => (a.store_number ?? '').localeCompare(b.store_number ?? '')) }));
+      get().addToast('success', `Store "${store.name}" (No. ${nextStoreNumber}) created successfully`);
       return { error: null };
     } catch (err) {
       return { error: (err as Error).message };
@@ -268,6 +299,204 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().addToast('error', 'Failed to load inventory');
     } finally {
       set({ inventoryLoading: false });
+    }
+  },
+
+  // ---------- PLU Categories ----------
+  pluCategories: [],
+  pluCategoriesLoading: false,
+
+  fetchPluCategories: async () => {
+    set({ pluCategoriesLoading: true });
+    try {
+      const supabase = getSupabaseClient();
+      const { data, error } = await supabase
+        .from('plu_categories')
+        .select('*, creator:users!plu_categories_created_by_fkey(username)')
+        .order('name');
+      if (error) throw error;
+      const mapped = (data as any[] ?? []).map((cat) => ({
+        ...cat,
+        creator_username: cat.creator?.username ?? 'System',
+      })) as PluCategory[];
+      set({ pluCategories: mapped });
+    } catch (err) {
+      console.error('fetchPluCategories error:', err);
+      get().addToast('error', 'Failed to load categories');
+    } finally {
+      set({ pluCategoriesLoading: false });
+    }
+  },
+
+  addPluCategory: async (name) => {
+    try {
+      // Import/fetch auth profile to check who is creating the category
+      const { useAuthStore } = await import('./authStore');
+      const userId = useAuthStore.getState().profile?.user_id || null;
+
+      const response = await fetch('/api/plu_categories/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, created_by: userId }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        return { error: result.error || 'Failed to create category' };
+      }
+      // Refresh list
+      await get().fetchPluCategories();
+      get().addToast('success', `Category "${name}" created`);
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  updatePluCategory: async (id, name) => {
+    try {
+      const response = await fetch(`/api/plu_categories/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        return { error: result.error || 'Failed to update category' };
+      }
+      // Refresh list
+      await get().fetchPluCategories();
+      get().addToast('success', `Category "${name}" updated`);
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  deletePluCategory: async (id) => {
+    try {
+      const response = await fetch(`/api/plu_categories/${id}`, {
+        method: 'DELETE',
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        return { error: result.error || 'Failed to delete category' };
+      }
+      // Refresh list
+      await get().fetchPluCategories();
+      get().addToast('success', 'Category deleted');
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  // ---------- PLU ----------
+  plusItems: [],
+  plusLoading: false,
+
+  fetchPlus: async () => {
+    set({ plusLoading: true });
+    try {
+      const supabase = getSupabaseClient();
+      const { data, error } = await supabase
+        .from('plu')
+        .select('*, plu_categories(name)')
+        .order('plu_number');
+      if (error) throw error;
+      const mapped = (data ?? []).map((item: any) => ({
+        ...item,
+        category_name: item.plu_categories?.name ?? null,
+        plu_categories: undefined,
+      })) as Plu[];
+      set({ plusItems: mapped });
+    } catch (err) {
+      console.error('fetchPlus error:', err);
+      get().addToast('error', 'Failed to load PLUs');
+    } finally {
+      set({ plusLoading: false });
+    }
+  },
+
+  addPlu: async (data) => {
+    try {
+      const supabase = getSupabaseClient();
+      // Check uniqueness
+      const { count } = await supabase
+        .from('plu')
+        .select('plu_id', { count: 'exact', head: true })
+        .eq('plu_number', data.plu_number);
+      if ((count ?? 0) > 0) {
+        return { error: `PLU number "${data.plu_number}" already exists. Please use a different number.` };
+      }
+      const { data: inserted, error } = await supabase
+        .from('plu')
+        .insert(data)
+        .select('*, plu_categories(name)')
+        .single();
+      if (error) return { error: error.message };
+      const newItem = {
+        ...inserted,
+        category_name: (inserted as any).plu_categories?.name ?? null,
+        plu_categories: undefined,
+      } as Plu;
+      set((s) => ({ plusItems: [...s.plusItems, newItem] }));
+      get().addToast('success', `PLU "${data.plu_number} — ${data.name}" created`);
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  updatePlu: async (id, data) => {
+    try {
+      const supabase = getSupabaseClient();
+      // If plu_number is changing, check uniqueness
+      if (data.plu_number) {
+        const { count } = await supabase
+          .from('plu')
+          .select('plu_id', { count: 'exact', head: true })
+          .eq('plu_number', data.plu_number)
+          .neq('plu_id', id);
+        if ((count ?? 0) > 0) {
+          return { error: `PLU number "${data.plu_number}" already exists.` };
+        }
+      }
+      const { error } = await supabase.from('plu').update(data).eq('plu_id', id);
+      if (error) return { error: error.message };
+      // Refresh category name if category changed
+      await get().fetchPlus();
+      get().addToast('success', 'PLU updated successfully');
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  deletePlu: async (id) => {
+    try {
+      const supabase = getSupabaseClient();
+      const { error } = await supabase.from('plu').delete().eq('plu_id', id);
+      if (error) return { error: error.message };
+      set((s) => ({ plusItems: s.plusItems.filter((p) => p.plu_id !== id) }));
+      get().addToast('success', 'PLU deleted');
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  getNextPluNumber: async () => {
+    try {
+      const supabase = getSupabaseClient();
+      const { data } = await supabase
+        .from('plu')
+        .select('plu_number')
+        .order('created_at', { ascending: false });
+      const nums = (data ?? []).map((r: any) => parseInt(r.plu_number, 10)).filter((n) => !isNaN(n));
+      const max = nums.length > 0 ? Math.max(...nums) : 0;
+      return String(max + 1).padStart(3, '0');
+    } catch {
+      return '001';
     }
   },
 

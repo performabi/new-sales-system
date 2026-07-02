@@ -10,6 +10,8 @@ import Dashboard from '../pages/Dashboard';
 import Stores from '../pages/Stores';
 import Users from '../pages/Users';
 import Inventory from '../pages/Inventory';
+import Plu from '../pages/Plu';
+import PluCategories from '../pages/PluCategories';
 
 function ProtectedRoute({ children, requireAdmin = false }: { children: React.ReactNode; requireAdmin?: boolean }) {
   const { session, profile, loading } = useAuthStore();
@@ -69,8 +71,10 @@ export default function AppRouter() {
         >
           <Route index element={<Dashboard />} />
           <Route path="stores" element={<Stores />} />
+          <Route path="plu" element={<Plu />} />
           <Route path="users" element={<Users />} />
           <Route path="inventory" element={<Inventory />} />
+          <Route path="setup/categories" element={<PluCategories />} />
         </Route>
 
         <Route path="*" element={<Navigate to="/" replace />} />

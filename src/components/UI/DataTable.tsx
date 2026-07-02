@@ -37,7 +37,7 @@ export default function DataTable({
           <tbody>
             {data.map((row, i) => (
               <tr
-                key={row.id || row.store_id || row.user_id || row.product_id || i}
+                key={row.id || row.store_id || row.user_id || row.product_id || row.category_id || row.plu_id || i}
                 onClick={() => onRowClick?.(row)}
                 style={{ cursor: onRowClick ? 'pointer' : 'default' }}
               >

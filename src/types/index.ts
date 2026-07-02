@@ -8,6 +8,40 @@ export interface Store {
   vat_number: string;
   created_at: string;
   is_active?: boolean;
+  store_number?: string | null;  // 3-digit identifier e.g. "001"
+}
+
+export interface PluCategory {
+  category_id: string;
+  name: string;
+  created_at: string;
+  created_by?: string | null;
+  creator_username?: string | null;
+}
+
+export type VatClass = 'standard' | 'zero_rated' | 'exempt';
+
+export interface Plu {
+  plu_id: string;
+  plu_number: string;          // unique code e.g. "001", "PROMO-10"
+  name: string;
+  category_id: string | null;
+  vat_class: VatClass;
+  uses_scale: boolean;
+  ean: string | null;
+  headoffice_price: number | null;
+  store_001: number | null;
+  store_002: number | null;
+  store_003: number | null;
+  store_004: number | null;
+  store_005: number | null;
+  store_006: number | null;
+  store_007: number | null;
+  store_008: number | null;
+  store_009: number | null;
+  created_at: string;
+  // Joined field
+  category_name?: string;
 }
 
 export interface UserProfile {

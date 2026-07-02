@@ -6,8 +6,8 @@ import { apiPlugin } from './src/server/apiPlugin';
 export default defineConfig({
   plugins: [react(), apiPlugin()],
   server: {
-    port: 4545,
-    strictPort: true,      // fail if 4545 is already taken
+    port: 5174,
+    strictPort: false, // allow fallback if port taken
     open: true,            // auto-open browser
   },
 });

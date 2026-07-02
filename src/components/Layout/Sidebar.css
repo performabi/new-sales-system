@@ -200,6 +200,24 @@
   color: var(--error) !important;
 }
 
+/* ---------- Setup Section Label ---------- */
+.sidebar-section-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.3);
+  padding: 12px 14px 4px;
+  white-space: nowrap;
+  animation: fadeIn var(--transition-fast) ease-out;
+}
+
+.sidebar-section-divider {
+  height: 1px;
+  background: rgba(255, 255, 255, 0.07);
+  margin: 10px 8px 6px;
+}
+
 /* ---------- Tooltip (collapsed state) ---------- */
 .sidebar.collapsed .nav-item {
   position: relative;
