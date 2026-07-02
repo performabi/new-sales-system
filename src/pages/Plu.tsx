@@ -524,13 +524,38 @@ export default function PluPage() {
 
           {error && <div className="form-error" style={{ marginBottom: 12 }}>{error}</div>}
 
-          <div className="modal-actions" style={{ marginTop: 8 }}>
-            <button type="button" className="btn btn-ghost" onClick={closeModal} disabled={isSubmitting}>
-              Cancel
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
-              {isSubmitting ? 'Saving…' : isEditMode ? 'Update PLU' : 'Register PLU'}
-            </button>
+          <div className="modal-actions" style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between', width: '100%' }}>
+            <div>
+              {isEditMode && (
+                <button
+                  type="button"
+                  className="btn"
+                  onClick={() => {
+                    const date = prompt("Enter date to schedule changes (DD/MM/YYYY):");
+                    if (date) {
+                      alert(`Changes scheduled for deployment on ${date}`);
+                      closeModal();
+                    }
+                  }}
+                  style={{
+                    background: 'var(--warning)',
+                    color: 'var(--bg-card)',
+                    border: 'none',
+                    fontWeight: 600
+                  }}
+                >
+                  ⏳ Schedule Changes
+                </button>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button type="button" className="btn btn-ghost" onClick={closeModal} disabled={isSubmitting}>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={isSubmitting}>
+                {isSubmitting ? 'Saving…' : isEditMode ? 'Update PLU' : 'Register PLU'}
+              </button>
+            </div>
           </div>
         </form>
       </Modal>
