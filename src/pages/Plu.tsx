@@ -145,7 +145,15 @@ export default function PluPage() {
     setIsModalOpen(true);
   };
 
-  const closeModal = () => { setIsModalOpen(false); setEditingId(null); };
+  const [isScheduling, setIsScheduling] = useState(false);
+  const [scheduledDateTime, setScheduledDateTime] = useState('');
+
+  const closeModal = () => { 
+    setIsModalOpen(false); 
+    setEditingId(null); 
+    setIsScheduling(false);
+    setScheduledDateTime('');
+  };
 
   const toNullableDecimal = (v: string) => v === '' ? null : parseFloat(v);
 
@@ -524,19 +532,64 @@ export default function PluPage() {
 
           {error && <div className="form-error" style={{ marginBottom: 12 }}>{error}</div>}
 
+          {/* Schedule Calendar Input Panel */}
+          {isEditMode && isScheduling && (
+            <div style={{
+              background: 'var(--bg-card)',
+              border: '1px solid var(--border-light)',
+              borderRadius: '6px',
+              padding: '12px',
+              marginTop: '4px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px'
+            }} onClick={(e) => e.stopPropagation()}>
+              <label className="form-label" htmlFor="plu-schedule-time" style={{ fontWeight: 600, margin: 0 }}>
+                Select Schedule Date &amp; Time
+              </label>
+              <input
+                id="plu-schedule-time"
+                type="datetime-local"
+                className="form-input"
+                value={scheduledDateTime}
+                onChange={(e) => setScheduledDateTime(e.target.value)}
+                required
+              />
+              <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-ghost"
+                  onClick={() => setIsScheduling(false)}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  style={{ background: 'var(--primary)', color: '#fff' }}
+                  onClick={() => {
+                    if (!scheduledDateTime) {
+                      alert("Please select a date and time first.");
+                      return;
+                    }
+                    const formatted = new Date(scheduledDateTime).toLocaleString('en-GB');
+                    alert(`Changes scheduled for deployment on: ${formatted}`);
+                    closeModal();
+                  }}
+                >
+                  Confirm Schedule
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="modal-actions" style={{ marginTop: 8, display: 'flex', justifyContent: 'space-between', width: '100%' }}>
             <div>
-              {isEditMode && (
+              {isEditMode && !isScheduling && (
                 <button
                   type="button"
                   className="btn"
-                  onClick={() => {
-                    const date = prompt("Enter date to schedule changes (DD/MM/YYYY):");
-                    if (date) {
-                      alert(`Changes scheduled for deployment on ${date}`);
-                      closeModal();
-                    }
-                  }}
+                  onClick={() => setIsScheduling(true)}
                   style={{
                     background: 'var(--warning)',
                     color: 'var(--bg-card)',
