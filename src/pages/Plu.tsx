@@ -396,9 +396,59 @@ export default function PluPage() {
           <div style={{ marginTop: 8, borderTop: '1px solid var(--border-light)', paddingTop: 14 }}>
             {/* Global Price */}
             <div className="form-group" style={{ marginBottom: 12 }}>
-              <label className="form-label" htmlFor="plu-ho-price" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 600 }}>
-                Global Price (£)
-              </label>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                <label className="form-label" htmlFor="plu-ho-price" style={{ margin: 0, fontWeight: 600 }}>
+                  Global Price (£)
+                </label>
+                {/* Question mark trigger for info balloon */}
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    const balloon = document.getElementById('price-info-balloon');
+                    if (balloon) {
+                      balloon.style.display = balloon.style.display === 'none' ? 'block' : 'none';
+                    }
+                  }}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    width: '18px',
+                    height: '18px',
+                    borderRadius: '50%',
+                    background: 'var(--border-medium)',
+                    color: 'var(--text-secondary)',
+                    fontSize: '0.75rem',
+                    fontWeight: 'bold',
+                    cursor: 'pointer',
+                    border: 'none',
+                    padding: 0
+                  }}
+                  title="Click to see how variable pricing works"
+                >
+                  ?
+                </button>
+              </div>
+
+              {/* Info Balloon Container (Excel comment style, toggled inline) */}
+              <div
+                id="price-info-balloon"
+                style={{
+                  display: 'none',
+                  background: 'var(--bg-input)',
+                  borderLeft: '4px solid var(--primary)',
+                  padding: '8px 12px',
+                  borderRadius: '4px',
+                  fontSize: '0.8rem',
+                  color: 'var(--text-secondary)',
+                  lineHeight: '1.4',
+                  marginBottom: '10px'
+                }}
+              >
+                💡 <strong>How variable pricing works:</strong> By default, all stores charge the <strong>Global Price</strong>. If you want a specific store to charge a different rate, expand the section below and enter a custom price for that store.
+              </div>
+
               <input
                 id="plu-ho-price"
                 type="number"
@@ -436,18 +486,9 @@ export default function PluPage() {
               </summary>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginTop: '12px', cursor: 'default' }} onClick={(e) => e.stopPropagation()}>
-                {/* Embedded comment note explaining overrides (Excel-comment style) */}
-                <div style={{
-                  background: 'var(--bg-input)',
-                  borderLeft: '4px solid var(--primary)',
-                  padding: '8px 12px',
-                  borderRadius: '4px',
-                  fontSize: '0.8rem',
-                  color: 'var(--text-secondary)',
-                  lineHeight: '1.4'
-                }}>
-                  💡 <strong>How overrides work:</strong> By default, all stores charge the <strong>Global Price</strong>. If you enter a specific price for a store below, that store will use it instead of the Global Price.
-                </div>
+                <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: 0 }}>
+                  Enter prices below only for stores that charge different rates than the Global Price.
+                </p>
                 {STORE_KEYS.map((key) => {
                   const storeNum = key.replace('store_', '');
                   const storeObj = storesWithNumber.find((s) => s.store_number === storeNum);
