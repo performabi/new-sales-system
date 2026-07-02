@@ -14,6 +14,7 @@ const MAIN_NAV_ITEMS = [
 
 const SETUP_NAV_ITEMS = [
   { path: '/setup/categories', icon: '🗂️', label: 'Categories' },
+  { path: '/setup/logbook',    icon: '📋', label: 'Logbook' },
 ];
 
 export default function Sidebar() {

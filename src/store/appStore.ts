@@ -3,6 +3,17 @@ import { create } from 'zustand';
 import type { Store, UserProfile, InventoryItem, Toast, PluCategory, Plu } from '../types';
 import { getSupabaseClient } from '../lib/supabaseClient';
 
+export interface LogEntry {
+  id: string;
+  timestamp: string;       // ISO
+  entity: string;          // 'PLU' | 'Store' | 'Category' | 'User'
+  entityLabel: string;     // human-readable name/number
+  field: string;           // field that changed
+  oldValue: string;
+  newValue: string;
+  username: string;        // who made the change
+}
+
 interface AppState {
   // Sidebar
   sidebarCollapsed: boolean;
@@ -59,9 +70,21 @@ interface AppState {
   toasts: Toast[];
   addToast: (type: Toast['type'], message: string) => void;
   removeToast: (id: string) => void;
+
+  // Logbook
+  logEntries: LogEntry[];
+  logbookLoading: boolean;
+  fetchLogbook: () => Promise<void>;
+  addLogEntry: (entry: Omit<LogEntry, 'id' | 'timestamp' | 'username'>) => Promise<void>;
+  exportLogCsv: () => void;
+
+  // PLU Scheduled Changes
+  schedulePluChange: (pluId: string, payload: Record<string, any>, scheduledAt: string, createdBy: string) => Promise<{ error: string | null }>;
+  applyDueScheduledChanges: () => Promise<void>;
 }
 
 let toastId = 0;
+let logId = 0;
 
 export const useAppStore = create<AppState>((set, get) => ({
   // ---------- Sidebar ----------
@@ -124,6 +147,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   updateStore: async (id, data) => {
     try {
       const supabase = getSupabaseClient();
+      // Capture old values before update for logging
+      const oldStore = get().stores.find((s) => s.store_id === id);
       const { error } = await supabase
         .from('stores')
         .update(data)
@@ -134,6 +159,22 @@ export const useAppStore = create<AppState>((set, get) => ({
           st.store_id === id ? { ...st, ...data } : st,
         ),
       }));
+      // Log each changed field
+      if (oldStore) {
+        for (const key of Object.keys(data) as (keyof typeof data)[]) {
+          const oldVal = String(oldStore[key as keyof Store] ?? '');
+          const newVal = String((data as any)[key] ?? '');
+          if (oldVal !== newVal) {
+            await get().addLogEntry({
+              entity: 'Store',
+              entityLabel: oldStore.name,
+              field: key as string,
+              oldValue: oldVal,
+              newValue: newVal,
+            });
+          }
+        }
+      }
       get().addToast('success', 'Store updated successfully');
       return { error: null };
     } catch (err) {
@@ -354,6 +395,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   updatePluCategory: async (id, name) => {
     try {
+      const oldCat = get().pluCategories.find((c) => c.category_id === id);
       const response = await fetch(`/api/plu_categories/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -362,6 +404,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       const result = await response.json();
       if (!response.ok) {
         return { error: result.error || 'Failed to update category' };
+      }
+      if (oldCat && oldCat.name !== name) {
+        await get().addLogEntry({
+          entity: 'Category',
+          entityLabel: oldCat.name,
+          field: 'name',
+          oldValue: oldCat.name,
+          newValue: name,
+        });
       }
       // Refresh list
       await get().fetchPluCategories();
@@ -440,7 +491,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         plu_categories: undefined,
       } as Plu;
       set((s) => ({ plusItems: [...s.plusItems, newItem] }));
-      get().addToast('success', `PLU "${data.plu_number} — ${data.name}" created`);
+      get().addToast('success', `PLU "${data.plu_number}, ${data.name}" created`);
+
       return { error: null };
     } catch (err) {
       return { error: (err as Error).message };
@@ -450,6 +502,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   updatePlu: async (id, data) => {
     try {
       const supabase = getSupabaseClient();
+      const oldPlu = get().plusItems.find((p) => p.plu_id === id);
       // If plu_number is changing, check uniqueness
       if (data.plu_number) {
         const { count } = await supabase
@@ -463,6 +516,23 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       const { error } = await supabase.from('plu').update(data).eq('plu_id', id);
       if (error) return { error: error.message };
+      // Log each changed field
+      if (oldPlu) {
+        for (const key of Object.keys(data) as (keyof typeof data)[]) {
+          const oldVal = String((oldPlu as any)[key] ?? '');
+          const newVal = String((data as any)[key] ?? '');
+          if (oldVal !== newVal) {
+            await get().addLogEntry({
+              entity: 'PLU',
+              entityLabel: `${oldPlu.plu_number}, ${oldPlu.name}`,
+
+              field: key as string,
+              oldValue: oldVal,
+              newValue: newVal,
+            });
+          }
+        }
+      }
       // Refresh category name if category changed
       await get().fetchPlus();
       get().addToast('success', 'PLU updated successfully');
@@ -511,5 +581,116 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   removeToast: (id) => {
     set((s) => ({ toasts: s.toasts.filter((t) => t.id !== id) }));
+  },
+
+  // ---------- Logbook ----------
+  logEntries: [],
+  logbookLoading: false,
+
+  fetchLogbook: async () => {
+    set({ logbookLoading: true });
+    try {
+      const res = await fetch('/api/logbook');
+      if (!res.ok) return;
+      const rows = await res.json() as any[];
+      const mapped: LogEntry[] = rows.map((r) => ({
+        id: r.id,
+        timestamp: r.timestamp,
+        entity: r.entity,
+        entityLabel: r.entity_label,
+        field: r.field,
+        oldValue: r.old_value ?? '',
+        newValue: r.new_value ?? '',
+        username: r.username,
+      }));
+      set({ logEntries: mapped });
+    } catch (err) {
+      console.error('fetchLogbook error:', err);
+    } finally {
+      set({ logbookLoading: false });
+    }
+  },
+
+  addLogEntry: async (entry) => {
+    const { useAuthStore } = await import('./authStore');
+    const username = useAuthStore.getState().profile?.username ?? 'Unknown';
+    const newEntry: LogEntry = {
+      id: String(++logId),
+      timestamp: new Date().toISOString(),
+      username,
+      ...entry,
+    };
+    // Optimistic local update
+    set((s) => ({ logEntries: [newEntry, ...s.logEntries] }));
+    // Persist to Supabase via server endpoint (fire and forget)
+    try {
+      await fetch('/api/logbook/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...entry, username }),
+      });
+    } catch {
+      // Non-critical — local entry already added
+    }
+  },
+
+  exportLogCsv: () => {
+    const entries = get().logEntries;
+    const headers = ['Date/Time', 'User', 'Entity', 'Record', 'Field', 'Old Value', 'New Value'];
+    const rows = entries.map((e) => [
+      new Date(e.timestamp).toLocaleString('en-GB'),
+      e.username,
+      e.entity,
+      e.entityLabel,
+      e.field,
+      e.oldValue,
+      e.newValue,
+    ]);
+    const csv = [headers, ...rows]
+      .map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))
+      .join('\n');
+    // \uFEFF = UTF-8 BOM so Excel opens with correct encoding
+    const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `change_log_${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  },
+
+  // ---------- PLU Scheduled Changes ----------
+  schedulePluChange: async (pluId, payload, scheduledAt, createdBy) => {
+    try {
+      const res = await fetch('/api/plu_scheduled_changes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plu_id: pluId, payload, scheduled_at: scheduledAt, created_by: createdBy }),
+      });
+      const result = await res.json();
+      if (!res.ok) return { error: result.error || 'Failed to schedule change' };
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  applyDueScheduledChanges: async () => {
+    try {
+      const res = await fetch('/api/plu_scheduled_changes/due');
+      if (!res.ok) return;
+      const due = await res.json() as any[];
+      if (!due.length) return;
+      for (const sc of due) {
+        const { error } = await get().updatePlu(sc.plu_id, sc.payload);
+        if (!error) {
+          // Mark applied
+          await fetch(`/api/plu_scheduled_changes/${sc.id}/applied`, { method: 'PUT' });
+          get().addToast('success', `Scheduled PLU change applied ✔`);
+        }
+      }
+    } catch (err) {
+      console.error('applyDueScheduledChanges error:', err);
+    }
   },
 }));
