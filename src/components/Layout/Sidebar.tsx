@@ -2,6 +2,7 @@
 import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
 import { useAppStore } from '../../store/appStore';
+import ThemeToggle from '../UI/ThemeToggle';
 import './Sidebar.css';
 
 const MAIN_NAV_ITEMS = [
@@ -61,6 +62,7 @@ export default function Sidebar() {
               }}>
                 {profile?.role?.replace('_', ' ') ?? ''}
               </span>
+              <ThemeToggle />
             </div>
           )}
         </div>

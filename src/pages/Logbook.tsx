@@ -100,7 +100,7 @@ export default function LogbookPage() {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.875rem' }}>
             <thead>
               <tr style={{ background: 'var(--bg-header)', borderBottom: '2px solid var(--border-light)' }}>
-                {['Date / Time', 'User', 'Type', 'Record', 'Field', 'Old Value', 'New Value'].map((h) => (
+                {['Date / Time', 'User', 'Type', 'PLU #, Description', 'Field', 'Old Value', 'New Value'].map((h) => (
                   <th key={h} style={{ padding: '10px 14px', textAlign: 'left', fontWeight: 600, color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
                     {h}
                   </th>

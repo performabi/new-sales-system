@@ -222,15 +222,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       const supabase = getSupabaseClient();
       const { data, error } = await supabase
         .from('users')
-        .select('*, stores(name), creator:users!users_created_by_fkey(username)')
+        .select('*, stores!users_assigned_store_id_fkey(name)')
         .order('full_name');
       if (error) throw error;
       const mapped = (data ?? []).map((u: any) => ({
         ...u,
         assigned_store_name: u.stores?.name ?? 'Head Office',
-        creator_username: u.creator?.username ?? null,
         stores: undefined,
-        creator: undefined,
       })) as UserProfile[];
       set({ users: mapped });
     } catch (err) {
@@ -414,12 +412,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       const supabase = getSupabaseClient();
       const { data, error } = await supabase
         .from('plu_categories')
-        .select('*, creator:users!plu_categories_created_by_fkey(username)')
+        .select('*')
         .order('name');
       if (error) throw error;
       const mapped = (data as any[] ?? []).map((cat) => ({
         ...cat,
-        creator_username: cat.creator?.username ?? 'System',
       })) as PluCategory[];
       set({ pluCategories: mapped });
     } catch (err) {
@@ -523,15 +520,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       const supabase = getSupabaseClient();
       const { data, error } = await supabase
         .from('plu')
-        .select('*, plu_categories(name), creator:users!plu_created_by_fkey(username)')
+        .select('*, plu_categories(name)')
         .order('plu_number');
       if (error) throw error;
       const mapped = (data ?? []).map((item: any) => ({
         ...item,
         category_name: item.plu_categories?.name ?? null,
-        creator_username: item.creator?.username ?? null,
         plu_categories: undefined,
-        creator: undefined,
       })) as Plu[];
       set({ plusItems: mapped });
     } catch (err) {
