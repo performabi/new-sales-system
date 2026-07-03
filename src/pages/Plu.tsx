@@ -150,8 +150,6 @@ export default function PluPage() {
   const closeModal = () => { 
     setIsModalOpen(false); 
     setEditingId(null); 
-    setIsScheduling(false);
-    setScheduledDateTime('');
   };
 
   const toNullableDecimal = (v: string) => v === '' ? null : parseFloat(v);

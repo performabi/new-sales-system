@@ -238,7 +238,7 @@ app.post('/api/logbook/create', async (req, res) => {
 });
 
 // ---- Logbook: fetch all entries (newest first) ----
-app.get('/api/logbook', async (req, res) => {
+app.get('/api/logbook', async (_req, res) => {
   try {
     const env = loadEnv(server.config.mode, process.cwd(), '');
     const supabaseAdmin = createClient(env.VITE_SUPABASE_URL || '', env.SERVICE_ROLE || '', {
@@ -279,7 +279,7 @@ app.post('/api/plu_scheduled_changes', async (req, res) => {
 });
 
 // ---- PLU Scheduled Changes: fetch all pending due now ----
-app.get('/api/plu_scheduled_changes/due', async (req, res) => {
+app.get('/api/plu_scheduled_changes/due', async (_req, res) => {
   try {
     const env = loadEnv(server.config.mode, process.cwd(), '');
     const supabaseAdmin = createClient(env.VITE_SUPABASE_URL || '', env.SERVICE_ROLE || '', {
