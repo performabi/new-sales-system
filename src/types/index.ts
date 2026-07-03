@@ -7,6 +7,7 @@ export interface Store {
   postcode: string;
   vat_number: string;
   created_at: string;
+  created_by?: string | null;
   is_active?: boolean;
   store_number?: string | null;  // 3-digit identifier e.g. "001"
 }
@@ -40,8 +41,10 @@ export interface Plu {
   store_008: number | null;
   store_009: number | null;
   created_at: string;
+  created_by?: string | null;
   // Joined field
   category_name?: string;
+  creator_username?: string | null;
 }
 
 export interface UserProfile {
@@ -54,6 +57,9 @@ export interface UserProfile {
   requires_password_change?: boolean;
   assigned_store_id: string | null;
   assigned_store_name?: string;
+  created_at?: string | null;
+  created_by?: string | null;
+  creator_username?: string | null;
 }
 
 export interface InventoryItem {

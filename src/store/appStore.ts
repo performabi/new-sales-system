@@ -116,7 +116,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   addStore: async (store) => {
     try {
       const supabase = getSupabaseClient();
-      
+      const { useAuthStore } = await import('./authStore');
+      const userId = useAuthStore.getState().profile?.user_id || null;
+
       // Calculate next sequential 3-digit store number (e.g. "001", "002"...)
       const currentStores = get().stores;
       const numericNumbers = currentStores
@@ -127,7 +129,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       const storePayload = {
         ...store,
-        store_number: nextStoreNumber
+        store_number: nextStoreNumber,
+        created_by: userId,
       };
 
       const { data, error } = await supabase
@@ -185,11 +188,22 @@ export const useAppStore = create<AppState>((set, get) => ({
   deleteStore: async (id) => {
     try {
       const supabase = getSupabaseClient();
+      const deletedStore = get().stores.find((s) => s.store_id === id);
       const { error } = await supabase
         .from('stores')
         .delete()
         .eq('store_id', id);
       if (error) return { error: error.message };
+      // Log deletion
+      if (deletedStore) {
+        await get().addLogEntry({
+          entity: 'Store',
+          entityLabel: deletedStore.name,
+          field: '[DELETED]',
+          oldValue: deletedStore.name,
+          newValue: '',
+        });
+      }
       set((s) => ({ stores: s.stores.filter((st) => st.store_id !== id) }));
       get().addToast('success', 'Store deleted');
       return { error: null };
@@ -208,13 +222,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       const supabase = getSupabaseClient();
       const { data, error } = await supabase
         .from('users')
-        .select('*, stores(name)')
+        .select('*, stores(name), creator:users!users_created_by_fkey(username)')
         .order('full_name');
       if (error) throw error;
       const mapped = (data ?? []).map((u: any) => ({
         ...u,
         assigned_store_name: u.stores?.name ?? 'Head Office',
+        creator_username: u.creator?.username ?? null,
         stores: undefined,
+        creator: undefined,
       })) as UserProfile[];
       set({ users: mapped });
     } catch (err) {
@@ -227,6 +243,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   addUser: async (userData) => {
     try {
+      const { useAuthStore } = await import('./authStore');
+      const createdById = useAuthStore.getState().profile?.user_id || null;
       // Use our custom Vite API route which uses the service_role key
       // This bypasses the "Allow new users to sign up" toggle in Supabase
       const response = await fetch('/api/users/create', {
@@ -234,7 +252,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(userData),
+        body: JSON.stringify({ ...userData, created_by: createdById }),
       });
 
       const result = await response.json();
@@ -253,6 +271,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   updateUser: async (id, data) => {
     try {
+      const oldUser = get().users.find((u) => u.user_id === id);
       const response = await fetch(`/api/users/${id}`, {
         method: 'PUT',
         headers: {
@@ -265,6 +284,26 @@ export const useAppStore = create<AppState>((set, get) => ({
 
       if (!response.ok) {
         return { error: result.error || 'Failed to update user' };
+      }
+
+      // Log each changed field
+      if (oldUser) {
+        const loggableKeys = ['full_name', 'username', 'role', 'is_active', 'assigned_store_id'] as const;
+        for (const key of loggableKeys) {
+          if (key in data) {
+            const oldVal = String((oldUser as any)[key] ?? '');
+            const newVal = String((data as any)[key] ?? '');
+            if (oldVal !== newVal) {
+              await get().addLogEntry({
+                entity: 'User',
+                entityLabel: oldUser.full_name,
+                field: key,
+                oldValue: oldVal,
+                newValue: newVal,
+              });
+            }
+          }
+        }
       }
 
       set((s) => ({
@@ -281,12 +320,23 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   deleteUser: async (id) => {
     try {
+      const deletedUser = get().users.find((u) => u.user_id === id);
       const response = await fetch(`/api/users/${id}`, {
         method: 'DELETE',
       });
       const result = await response.json();
       if (!response.ok) {
         return { error: result.error || 'Failed to delete user' };
+      }
+      // Log deletion
+      if (deletedUser) {
+        await get().addLogEntry({
+          entity: 'User',
+          entityLabel: deletedUser.full_name,
+          field: '[DELETED]',
+          oldValue: `${deletedUser.username} (${deletedUser.role})`,
+          newValue: '',
+        });
       }
       set((s) => ({ users: s.users.filter((u) => u.user_id !== id) }));
       get().addToast('success', 'User deleted');
@@ -298,6 +348,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   resetUserPassword: async (id, newPassword?: string) => {
     try {
+      const targetUser = get().users.find((u) => u.user_id === id);
       const response = await fetch(`/api/users/${id}/reset-password`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -307,6 +358,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!response.ok) {
         get().addToast('error', result.error || 'Failed to reset password');
         return { error: result.error || 'Failed to reset password' };
+      }
+      // Log password reset
+      if (targetUser) {
+        await get().addLogEntry({
+          entity: 'User',
+          entityLabel: targetUser.full_name,
+          field: 'password',
+          oldValue: '(hidden)',
+          newValue: '[RESET]',
+        });
       }
       get().addToast('success', 'Password reset to Sales12345');
       return { error: null };
@@ -425,12 +486,23 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   deletePluCategory: async (id) => {
     try {
+      const deletedCat = get().pluCategories.find((c) => c.category_id === id);
       const response = await fetch(`/api/plu_categories/${id}`, {
         method: 'DELETE',
       });
       const result = await response.json();
       if (!response.ok) {
         return { error: result.error || 'Failed to delete category' };
+      }
+      // Log deletion
+      if (deletedCat) {
+        await get().addLogEntry({
+          entity: 'Category',
+          entityLabel: deletedCat.name,
+          field: '[DELETED]',
+          oldValue: deletedCat.name,
+          newValue: '',
+        });
       }
       // Refresh list
       await get().fetchPluCategories();
@@ -451,13 +523,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       const supabase = getSupabaseClient();
       const { data, error } = await supabase
         .from('plu')
-        .select('*, plu_categories(name)')
+        .select('*, plu_categories(name), creator:users!plu_created_by_fkey(username)')
         .order('plu_number');
       if (error) throw error;
       const mapped = (data ?? []).map((item: any) => ({
         ...item,
         category_name: item.plu_categories?.name ?? null,
+        creator_username: item.creator?.username ?? null,
         plu_categories: undefined,
+        creator: undefined,
       })) as Plu[];
       set({ plusItems: mapped });
     } catch (err) {
@@ -471,6 +545,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   addPlu: async (data) => {
     try {
       const supabase = getSupabaseClient();
+      const { useAuthStore } = await import('./authStore');
+      const userId = useAuthStore.getState().profile?.user_id || null;
       // Check uniqueness
       const { count } = await supabase
         .from('plu')
@@ -481,7 +557,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       const { data: inserted, error } = await supabase
         .from('plu')
-        .insert(data)
+        .insert({ ...data, created_by: userId })
         .select('*, plu_categories(name)')
         .single();
       if (error) return { error: error.message };
@@ -545,8 +621,19 @@ export const useAppStore = create<AppState>((set, get) => ({
   deletePlu: async (id) => {
     try {
       const supabase = getSupabaseClient();
+      const deletedPlu = get().plusItems.find((p) => p.plu_id === id);
       const { error } = await supabase.from('plu').delete().eq('plu_id', id);
       if (error) return { error: error.message };
+      // Log deletion
+      if (deletedPlu) {
+        await get().addLogEntry({
+          entity: 'PLU',
+          entityLabel: `${deletedPlu.plu_number}, ${deletedPlu.name}`,
+          field: '[DELETED]',
+          oldValue: `${deletedPlu.plu_number} - ${deletedPlu.name}`,
+          newValue: '',
+        });
+      }
       set((s) => ({ plusItems: s.plusItems.filter((p) => p.plu_id !== id) }));
       get().addToast('success', 'PLU deleted');
       return { error: null };
@@ -591,7 +678,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ logbookLoading: true });
     try {
       const res = await fetch('/api/logbook');
-      if (!res.ok) return;
+      if (!res.ok) { console.error('Failed to fetch logbook', res.status); return; }
       const rows = await res.json() as any[];
       const mapped: LogEntry[] = rows.map((r) => ({
         id: r.id,

@@ -1,5 +1,5 @@
 // src/pages/Logbook.tsx
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useAppStore } from '../store/appStore';
 
 const ENTITY_COLORS: Record<string, string> = {
@@ -10,7 +10,10 @@ const ENTITY_COLORS: Record<string, string> = {
 };
 
 export default function LogbookPage() {
-  const { logEntries, exportLogCsv } = useAppStore();
+  const { logEntries, exportLogCsv, fetchLogbook } = useAppStore();
+  useEffect(() => {
+    fetchLogbook();
+  }, []);
 
   const [searchQ, setSearchQ] = useState('');
   const [filterEntity, setFilterEntity] = useState('all');
