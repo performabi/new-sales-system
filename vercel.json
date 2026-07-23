@@ -16,6 +16,10 @@
       "destination": "/api/users/[id]"
     },
     {
+      "source": "/api/(.*)",
+      "destination": "/api/[...path]"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

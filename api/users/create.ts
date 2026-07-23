@@ -3,7 +3,7 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import crypto from 'crypto';
 
 // Expect these env vars to be set in Vercel dashboard
-const supabaseUrl = process.env.SUPABASE_URL || '';
+const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
 const serviceRole = process.env.SERVICE_ROLE || '';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -20,6 +20,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     role,
     pin,
     assigned_store_id,
+    created_by,
   } = req.body as {
     email: string;
     password: string;
@@ -28,6 +29,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     role: string;
     pin: string;
     assigned_store_id?: string | null;
+    created_by?: string | null;
   };
 
   // Basic validation
@@ -73,6 +75,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     pin_hash: pinHash,
     is_active: true,
     assigned_store_id: assigned_store_id || null,
+    created_by: created_by || null,
   });
 
   if (profileError) {
