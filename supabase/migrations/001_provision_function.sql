@@ -12,7 +12,7 @@ CREATE OR REPLACE FUNCTION public.provision_tenant(
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public
-AS $$
+AS $func$
 DECLARE
   v_tenant_id  UUID;
   v_schema     TEXT;
@@ -569,4 +569,4 @@ BEGIN
 
   RETURN v_tenant_id;
 END;
-$$;
+$func$;

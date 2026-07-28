@@ -51,7 +51,7 @@ function LoadingSpinner() {
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { session, profile, superUser, userType, loading } = useAuthStore();
+  const { session, profile, loading } = useAuthStore();
 
   if (loading) return <LoadingSpinner />;
   if (!session) return <Navigate to="/" replace />;

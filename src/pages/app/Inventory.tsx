@@ -1,7 +1,7 @@
 // src/pages/Inventory.tsx
 import { useEffect } from 'react';
-import { useAppStore } from '../store/appStore';
-import DataTable from '../components/UI/DataTable';
+import { useAppStore } from '../../store/appStore';
+import DataTable from '../../components/UI/DataTable';
 
 export default function Inventory() {
   const { inventory, inventoryLoading, fetchInventory } = useAppStore();

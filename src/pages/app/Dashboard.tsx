@@ -1,8 +1,8 @@
 // src/pages/Dashboard.tsx
 import { useEffect } from 'react';
-import { useAuthStore } from '../store/authStore';
-import { useAppStore } from '../store/appStore';
-import StatsCard from '../components/UI/StatsCard';
+import { useAuthStore } from '../../store/authStore';
+import { useAppStore } from '../../store/appStore';
+import StatsCard from '../../components/UI/StatsCard';
 
 export default function Dashboard() {
   const profile = useAuthStore((s) => s.profile);

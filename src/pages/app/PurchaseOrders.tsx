@@ -1,9 +1,9 @@
 // src/pages/PurchaseOrders.tsx
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAppStore } from '../store/appStore';
-import { useAuthStore } from '../store/authStore';
-import DataTable from '../components/UI/DataTable';
+import { useAppStore } from '../../store/appStore';
+import { useAuthStore } from '../../store/authStore';
+import DataTable from '../../components/UI/DataTable';
 
 export default function PurchaseOrders() {
   const navigate = useNavigate();

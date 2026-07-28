@@ -1,8 +1,8 @@
 // src/pages/Suppliers.tsx
 import { useEffect, useState, useCallback } from 'react';
-import { useAppStore } from '../store/appStore';
-import DataTable from '../components/UI/DataTable';
-import Modal from '../components/UI/Modal';
+import { useAppStore } from '../../store/appStore';
+import DataTable from '../../components/UI/DataTable';
+import Modal from '../../components/UI/Modal';
 
 export default function Suppliers() {
   const {

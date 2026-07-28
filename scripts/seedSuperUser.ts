@@ -69,19 +69,29 @@ async function seed() {
 async function upsertSuperUser(userId: string, email: string, fullName: string) {
   console.log('🔧  Adding to public.super_users …');
 
-  const { error } = await supabase.from('super_users').upsert(
-    {
-      super_user_id: userId,
-      email,
-      full_name: fullName,
-      role: 'super_admin',
-      is_active: true,
-    },
-    { onConflict: 'super_user_id' },
-  );
+  const payload = {
+    super_user_id: userId,
+    email,
+    full_name: fullName,
+    role: 'super_admin',
+    is_active: true,
+  };
 
-  if (error) {
-    console.error('❌  super_users insert error:', error.message);
+  const res = await fetch(`${SUPABASE_URL}/rest/v1/super_users`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${SERVICE_ROLE}`,
+      'apikey': SERVICE_ROLE,
+      'Accept': 'application/json',
+      'Prefer': 'resolution=merge-duplicates',
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    console.error('❌  super_users insert error:', text);
     process.exit(1);
   }
 

@@ -1,10 +1,10 @@
 // src/pages/Stores.tsx
 import { useEffect, useState } from 'react';
-import { useAppStore } from '../store/appStore';
-import DataTable from '../components/UI/DataTable';
-import Modal from '../components/UI/Modal';
+import { useAppStore } from '../../store/appStore';
+import DataTable from '../../components/UI/DataTable';
+import Modal from '../../components/UI/Modal';
 
-import { useAuthStore } from '../store/authStore';
+import { useAuthStore } from '../../store/authStore';
 
 export default function Stores() {
   const profile = useAuthStore((s) => s.profile);

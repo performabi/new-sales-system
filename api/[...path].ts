@@ -11,12 +11,6 @@ function getSupabaseAdmin(schema?: string) {
   return createClient(supabaseUrl, serviceRole, opts);
 }
 
-function getTenantContext(req: any, reqBody: any): string {
-  if (req.headers['x-tenant-schema']) return req.headers['x-tenant-schema'];
-  if (reqBody?.tenant_schema) return reqBody.tenant_schema;
-  return 'public';
-}
-
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   let supabaseAdmin;
   try {

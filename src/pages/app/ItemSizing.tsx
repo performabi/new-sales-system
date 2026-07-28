@@ -1,9 +1,9 @@
 // src/pages/ItemSizing.tsx
 import { useEffect, useState, useMemo } from 'react';
-import { useAppStore } from '../store/appStore';
-import DataTable from '../components/UI/DataTable';
-import Modal from '../components/UI/Modal';
-import { getSizingName, calculateCaseTotal } from '../lib/sizingUtils';
+import { useAppStore } from '../../store/appStore';
+import DataTable from '../../components/UI/DataTable';
+import Modal from '../../components/UI/Modal';
+import { getSizingName, calculateCaseTotal } from '../../lib/sizingUtils';
 
 export default function ItemSizing() {
   const { itemSizing, itemSizingLoading, fetchItemSizing, createItemSizing, updateItemSizing, deleteItemSizing } = useAppStore();

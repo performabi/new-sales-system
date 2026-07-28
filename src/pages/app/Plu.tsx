@@ -1,9 +1,9 @@
 // src/pages/Plu.tsx
 import { useEffect, useState, useMemo } from 'react';
-import { useAppStore } from '../store/appStore';
-import type { Plu, VatClass } from '../types';
-import DataTable from '../components/UI/DataTable';
-import Modal from '../components/UI/Modal';
+import { useAppStore } from '../../store/appStore';
+import type { Plu, VatClass } from '../../types';
+import DataTable from '../../components/UI/DataTable';
+import Modal from '../../components/UI/Modal';
 
 const VAT_OPTIONS: { value: VatClass; label: string }[] = [
   { value: 'standard',  label: 'Standard (20%)' },

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useAppStore } from '../store/appStore';
-import { useAuthStore } from '../store/authStore';
-import type { ItemSizing } from '../types';
+import { useAppStore } from '../../store/appStore';
+import { useAuthStore } from '../../store/authStore';
+import type { ItemSizing } from '../../types';
 
 interface ManualItem {
   plu_id: string;

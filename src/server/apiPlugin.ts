@@ -1586,7 +1586,7 @@ export function apiPlugin(): Plugin {
 
 
       // ---- Admin: list tenants ----
-      app.get('/api/admin/tenants', async (req, res) => {
+      app.get('/api/admin/tenants', async (_req, res) => {
         try {
           const supabaseAdmin = getSupabaseAdmin(server, 'public');
           const { data: tenants } = await supabaseAdmin.from('tenants').select('*').order('created_at', { ascending: false });
@@ -1652,7 +1652,7 @@ export function apiPlugin(): Plugin {
       });
 
       // ---- Admin: list super users ----
-      app.get('/api/admin/super-users', async (req, res) => {
+      app.get('/api/admin/super-users', async (_req, res) => {
         try {
           const supabaseAdmin = getSupabaseAdmin(server, 'public');
           const { data, error } = await supabaseAdmin.from('super_users').select('*').order('created_at', { ascending: false });
@@ -1695,7 +1695,7 @@ export function apiPlugin(): Plugin {
       });
 
       // ---- Admin: list plans ----
-      app.get('/api/admin/plans', async (req, res) => {
+      app.get('/api/admin/plans', async (_req, res) => {
         try {
           const supabaseAdmin = getSupabaseAdmin(server, 'public');
           const { data, error } = await supabaseAdmin.from('plans').select('*').order('price');

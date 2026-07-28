@@ -1,8 +1,8 @@
 // src/pages/PluCategories.tsx
 import { useEffect, useState } from 'react';
-import { useAppStore } from '../store/appStore';
-import DataTable from '../components/UI/DataTable';
-import Modal from '../components/UI/Modal';
+import { useAppStore } from '../../store/appStore';
+import DataTable from '../../components/UI/DataTable';
+import Modal from '../../components/UI/Modal';
 
 export default function PluCategories() {
   const {

@@ -1,6 +1,6 @@
 // src/pages/Logbook.tsx
 import { useState, useMemo, useEffect } from 'react';
-import { useAppStore } from '../store/appStore';
+import { useAppStore } from '../../store/appStore';
 
 const ENTITY_COLORS: Record<string, string> = {
   PLU:          'var(--primary)',
@@ -123,7 +123,7 @@ export default function LogbookPage() {
           onChange={(e) => setFilterEntity(e.target.value)}
         >
           {entities.map((ent) => (
-            <option key={ent} value={ent}>{ent === 'all' ? 'All types' : ent}</option>
+            <option key={ent as string} value={ent as string}>{(ent as string) === 'all' ? 'All types' : ent as string}</option>
           ))}
         </select>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.85rem', color: 'var(--text-muted)' }}>
