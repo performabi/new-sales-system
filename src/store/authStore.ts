@@ -43,13 +43,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const supabase = getSupabaseClient();
 
-      const { data: { session } } = await supabase.auth.getSession();
-      set({ session, user: session?.user ?? null });
-
-      if (session?.user) {
-        await resolveUserType(session.user, supabase, set);
-      }
-
+      // Subscribe before getSession to catch PASSWORD_RECOVERY event
       supabase.auth.onAuthStateChange(async (event, session) => {
         set({ session, user: session?.user ?? null });
 
@@ -64,6 +58,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           set({ profile: null, superUser: null, userType: null, isRecoveryMode: false });
         }
       });
+
+      const { data: { session } } = await supabase.auth.getSession();
+      set({ session, user: session?.user ?? null });
+
+      if (session?.user) {
+        // Check URL hash directly as fallback (event may have already fired)
+        if (window.location.hash.includes('type=recovery')) {
+          set({ isRecoveryMode: true });
+        } else {
+          await resolveUserType(session.user, supabase, set);
+        }
+      }
     } catch {
       console.warn('Auth initialization failed.');
     } finally {
