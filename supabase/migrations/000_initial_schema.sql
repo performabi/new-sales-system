@@ -192,7 +192,28 @@ CREATE TABLE IF NOT EXISTS public.purchase_order_items (
 );
 
 -- =============================================
--- 12. SALES TRANSACTIONS
+-- 12. LOYALTY CARDS
+--     defined before sales_transactions which references it
+-- =============================================
+CREATE TABLE IF NOT EXISTS public.loyalty_cards (
+  card_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  store_id         UUID REFERENCES public.stores(store_id) ON DELETE CASCADE,
+  card_number      VARCHAR(20) UNIQUE NOT NULL,
+  customer_name    TEXT NOT NULL,
+  phone            VARCHAR(20),
+  email            TEXT,
+  postcode         VARCHAR(10),
+  cashback_balance NUMERIC(10,2) NOT NULL DEFAULT 0.00,
+  is_active        BOOLEAN NOT NULL DEFAULT true,
+  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by       UUID REFERENCES public.users(user_id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_loyalty_cards_number ON public.loyalty_cards(card_number);
+CREATE INDEX IF NOT EXISTS idx_loyalty_cards_store  ON public.loyalty_cards(store_id);
+
+-- =============================================
+-- 13. SALES TRANSACTIONS
 -- =============================================
 CREATE TABLE IF NOT EXISTS public.sales_transactions (
   transaction_id  UUID           PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -270,27 +291,7 @@ CREATE INDEX IF NOT EXISTS idx_store_checklists_store_type
   ON public.store_checklists(store_id, type, sort_order);
 
 -- =============================================
--- 17. LOYALTY CARDS
--- =============================================
-CREATE TABLE IF NOT EXISTS public.loyalty_cards (
-  card_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  store_id         UUID REFERENCES public.stores(store_id) ON DELETE CASCADE,
-  card_number      VARCHAR(20) UNIQUE NOT NULL,
-  customer_name    TEXT NOT NULL,
-  phone            VARCHAR(20),
-  email            TEXT,
-  postcode         VARCHAR(10),
-  cashback_balance NUMERIC(10,2) NOT NULL DEFAULT 0.00,
-  is_active        BOOLEAN NOT NULL DEFAULT true,
-  created_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
-  created_by       UUID REFERENCES public.users(user_id) ON DELETE SET NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_loyalty_cards_number ON public.loyalty_cards(card_number);
-CREATE INDEX IF NOT EXISTS idx_loyalty_cards_store  ON public.loyalty_cards(store_id);
-
--- =============================================
--- 18. SYSTEM SETTINGS
+-- 17. SYSTEM SETTINGS
 -- =============================================
 CREATE TABLE IF NOT EXISTS public.system_settings (
   key        TEXT PRIMARY KEY,
@@ -299,7 +300,7 @@ CREATE TABLE IF NOT EXISTS public.system_settings (
 );
 
 -- =============================================
--- 19. LOYALTY NOTIFICATIONS
+-- 18. LOYALTY NOTIFICATIONS
 -- =============================================
 CREATE TABLE IF NOT EXISTS public.loyalty_notifications (
   notification_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
