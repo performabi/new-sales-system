@@ -83,10 +83,14 @@ ALTER TABLE public.plans       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tenants     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tenant_subscriptions ENABLE ROW LEVEL SECURITY;
 
--- Super users can see all super_users (themselves and teammates)
+-- Users can see their own row; existing super_admins can see all rows
 CREATE POLICY "super_users_read_own" ON public.super_users
   FOR SELECT TO authenticated
-  USING (EXISTS (SELECT 1 FROM public.super_users WHERE super_user_id = auth.uid()));
+  USING (
+    super_user_id = auth.uid()
+    OR
+    EXISTS (SELECT 1 FROM public.super_users WHERE super_user_id = auth.uid() AND role = 'super_admin')
+  );
 
 -- Only super_admin can modify super_users
 CREATE POLICY "super_users_admin_modify" ON public.super_users
