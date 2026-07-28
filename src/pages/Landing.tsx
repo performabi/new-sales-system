@@ -5,7 +5,7 @@ import { useAuthStore } from '../store/authStore';
 export default function Landing() {
   const navigate = useNavigate();
 
-  const { profile, superUser, userType, loading, signIn, signOut, resetPassword } = useAuthStore();
+  const { profile, superUser, userType, loading, signIn, signOut, resetPassword, isRecoveryMode } = useAuthStore();
   const [showHOLogin, setShowHOLogin] = useState(false);
   const [showForgot, setShowForgot] = useState(false);
   const [email, setEmail] = useState('');
@@ -17,6 +17,11 @@ export default function Landing() {
   useEffect(() => {
     if (loading) return;
 
+    if (isRecoveryMode) {
+      navigate('/reset-password', { replace: true });
+      return;
+    }
+
     if (userType === 'super_admin' || userType === 'support') {
       navigate('/admin/dashboard', { replace: true });
     } else if (profile) {
@@ -26,7 +31,7 @@ export default function Landing() {
         navigate('/app/dashboard', { replace: true });
       }
     }
-  }, [loading, userType, profile, navigate]);
+  }, [loading, userType, profile, isRecoveryMode, navigate]);
 
   const handleHOLogin = async (e: React.FormEvent) => {
     e.preventDefault();
