@@ -4,24 +4,10 @@
 -- =============================================
 
 -- =============================================
--- 1. STORES
+-- 1. USERS (links to Supabase Auth)
+--    created before stores to break circular FK
 -- =============================================
-CREATE TABLE IF NOT EXISTS stores (
-  store_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name          VARCHAR(255) NOT NULL,
-  address       TEXT NOT NULL,
-  postcode      VARCHAR(20) NOT NULL,
-  vat_number    VARCHAR(50) NOT NULL,
-  store_number  VARCHAR(10),
-  is_active     BOOLEAN DEFAULT true,
-  created_by    UUID REFERENCES users(user_id) ON DELETE SET NULL,
-  created_at    TIMESTAMPTZ DEFAULT now()
-);
-
--- =============================================
--- 2. USERS (links to Supabase Auth)
--- =============================================
-CREATE TABLE IF NOT EXISTS users (
+CREATE TABLE IF NOT EXISTS public.users (
   user_id                UUID PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   username               VARCHAR(50) UNIQUE NOT NULL,
   email                  VARCHAR(255),
@@ -30,24 +16,44 @@ CREATE TABLE IF NOT EXISTS users (
   role                   VARCHAR(20) NOT NULL CHECK (role IN ('super_user', 'admin', 'user')),
   is_active              BOOLEAN DEFAULT true,
   requires_password_change BOOLEAN DEFAULT false,
-  assigned_store_id      UUID REFERENCES stores(store_id) ON DELETE SET NULL,
+  assigned_store_id      UUID,
   created_at             TIMESTAMPTZ DEFAULT now(),
-  created_by             UUID REFERENCES users(user_id) ON DELETE SET NULL
+  created_by             UUID REFERENCES public.users(user_id) ON DELETE SET NULL
 );
+
+-- =============================================
+-- 2. STORES
+-- =============================================
+CREATE TABLE IF NOT EXISTS public.stores (
+  store_id      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  name          VARCHAR(255) NOT NULL,
+  address       TEXT NOT NULL,
+  postcode      VARCHAR(20) NOT NULL,
+  vat_number    VARCHAR(50) NOT NULL,
+  store_number  VARCHAR(10),
+  is_active     BOOLEAN DEFAULT true,
+  created_by    UUID REFERENCES public.users(user_id) ON DELETE SET NULL,
+  created_at    TIMESTAMPTZ DEFAULT now()
+);
+
+-- Now that stores exists, wire up the FK on users
+ALTER TABLE public.users
+  ADD CONSTRAINT fk_users_assigned_store
+  FOREIGN KEY (assigned_store_id) REFERENCES public.stores(store_id) ON DELETE SET NULL;
 
 -- =============================================
 -- 3. INVENTORY
 -- =============================================
-CREATE TABLE IF NOT EXISTS inventory (
+CREATE TABLE IF NOT EXISTS public.inventory (
   product_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  store_id       UUID NOT NULL REFERENCES stores(store_id) ON DELETE CASCADE,
+  store_id       UUID NOT NULL REFERENCES public.stores(store_id) ON DELETE CASCADE,
   name           VARCHAR(255) NOT NULL DEFAULT 'Unnamed Product',
   barcode_qr     VARCHAR(100),
   stock_quantity INTEGER DEFAULT 0,
   price          DECIMAL(12, 2) NOT NULL
 );
 
-CREATE INDEX IF NOT EXISTS idx_inventory_barcode ON inventory(barcode_qr);
+CREATE INDEX IF NOT EXISTS idx_inventory_barcode ON public.inventory(barcode_qr);
 
 -- =============================================
 -- 4. PLU CATEGORIES
@@ -249,7 +255,7 @@ CREATE INDEX IF NOT EXISTS idx_staff_timesheets_user_date
   ON public.staff_timesheets(user_id, clock_in DESC);
 
 -- =============================================
--- 16. STORE CHECKLISTS (no completions table)
+-- 16. STORE CHECKLISTS
 -- =============================================
 CREATE TABLE IF NOT EXISTS public.store_checklists (
   checklist_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -292,10 +298,6 @@ CREATE TABLE IF NOT EXISTS public.system_settings (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-INSERT INTO public.system_settings (key, value) VALUES
-  ('currency', '{"symbol":"£","code":"GBP","notes":[50,20,10,5],"coins":[2,1,0.5,0.2,0.1,0.05,0.02,0.01]}'::jsonb)
-ON CONFLICT (key) DO NOTHING;
-
 -- =============================================
 -- 19. LOYALTY NOTIFICATIONS
 -- =============================================
@@ -313,10 +315,23 @@ CREATE INDEX IF NOT EXISTS idx_loyalty_notifications_store ON public.loyalty_not
 CREATE INDEX IF NOT EXISTS idx_loyalty_notifications_sent ON public.loyalty_notifications(sent_at);
 
 -- =============================================
+-- SEED DATA
+-- =============================================
+
+-- Currency configuration
+INSERT INTO public.system_settings (key, value) VALUES
+  ('currency', '{"symbol":"£","code":"GBP","notes":[50,20,10,5],"coins":[2,1,0.5,0.2,0.1,0.05,0.02,0.01]}'::jsonb)
+ON CONFLICT (key) DO NOTHING;
+
+-- Loyalty cashback default (5%)
+INSERT INTO public.system_settings (key, value) VALUES
+  ('loyalty_cashback_percent', '{"percent":5}'::jsonb)
+ON CONFLICT (key) DO NOTHING;
+
+-- =============================================
 -- ROW LEVEL SECURITY
 -- =============================================
 
--- Helper: get current user's role
 CREATE OR REPLACE FUNCTION public.get_user_role()
 RETURNS VARCHAR
 LANGUAGE sql
@@ -326,7 +341,6 @@ AS $$
   SELECT role FROM users WHERE user_id = auth.uid();
 $$;
 
--- Helper: get current user's assigned store
 CREATE OR REPLACE FUNCTION public.get_user_store_id()
 RETURNS UUID
 LANGUAGE sql
@@ -336,52 +350,51 @@ AS $$
   SELECT assigned_store_id FROM users WHERE user_id = auth.uid();
 $$;
 
--- Enable RLS
-ALTER TABLE stores                    ENABLE ROW LEVEL SECURITY;
-ALTER TABLE users                     ENABLE ROW LEVEL SECURITY;
-ALTER TABLE inventory                 ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.plu_categories     ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.plu                ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.logbook            ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.plu_scheduled_changes ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.suppliers          ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.supplier_products  ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.purchase_orders    ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.purchase_order_items ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.sales_transactions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.sale_items         ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.item_sizing        ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.staff_timesheets   ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.store_checklists   ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.loyalty_cards      ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.loyalty_notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.stores                    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.users                     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.inventory                 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.plu_categories            ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.plu                       ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.logbook                   ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.plu_scheduled_changes     ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.suppliers                 ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.supplier_products         ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.purchase_orders           ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.purchase_order_items      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sales_transactions        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.sale_items                ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.item_sizing               ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.staff_timesheets          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.store_checklists          ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.loyalty_cards             ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.loyalty_notifications     ENABLE ROW LEVEL SECURITY;
 
 -- Stores
-CREATE POLICY "stores_admin_full_access" ON stores
+CREATE POLICY "stores_admin_full_access" ON public.stores
   FOR ALL USING (public.get_user_role() IN ('super_user', 'admin'))
   WITH CHECK (public.get_user_role() IN ('super_user', 'admin'));
 
-CREATE POLICY "stores_user_read_own" ON stores
+CREATE POLICY "stores_user_read_own" ON public.stores
   FOR SELECT USING (store_id = public.get_user_store_id());
 
 -- Users
-CREATE POLICY "users_superuser_full_access" ON users
+CREATE POLICY "users_superuser_full_access" ON public.users
   FOR ALL USING (public.get_user_role() = 'super_user')
   WITH CHECK (public.get_user_role() = 'super_user');
 
-CREATE POLICY "users_admin_manage" ON users
+CREATE POLICY "users_admin_manage" ON public.users
   FOR ALL USING (public.get_user_role() = 'admin' AND role != 'super_user')
   WITH CHECK (public.get_user_role() = 'admin' AND role != 'super_user');
 
-CREATE POLICY "users_read_self" ON users
+CREATE POLICY "users_read_self" ON public.users
   FOR SELECT USING (user_id = auth.uid());
 
 -- Inventory
-CREATE POLICY "inventory_admin_full_access" ON inventory
+CREATE POLICY "inventory_admin_full_access" ON public.inventory
   FOR ALL USING (public.get_user_role() IN ('super_user', 'admin'))
   WITH CHECK (public.get_user_role() IN ('super_user', 'admin'));
 
-CREATE POLICY "inventory_user_read_own" ON inventory
+CREATE POLICY "inventory_user_read_own" ON public.inventory
   FOR SELECT USING (store_id = public.get_user_store_id());
 
 -- PLU Categories
