@@ -8,6 +8,7 @@ import TerminalLayout from '../components/Layout/TerminalLayout';
 import ForceChangePassword from '../components/Auth/ForceChangePassword';
 
 import Landing from '../pages/Landing';
+import ResetPassword from '../pages/ResetPassword';
 
 import AdminDashboard from '../pages/admin/Dashboard';
 import AdminTenants from '../pages/admin/Tenants';
@@ -116,6 +117,7 @@ export default function AppRouter() {
     <BrowserRouter>
       <Routes>
         <Route path="/" element={<Landing />} />
+        <Route path="/reset-password" element={<ResetPassword />} />
 
         <Route
           path="/admin"

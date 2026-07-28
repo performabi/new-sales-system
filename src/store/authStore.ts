@@ -12,6 +12,7 @@ interface AuthState {
   superUser: SuperUser | null;
   userType: UserType;
   loading: boolean;
+  isRecoveryMode: boolean;
   setSession: (session: Session | null) => void;
   setProfile: (profile: UserProfile | null) => void;
   setSuperUser: (superUser: SuperUser | null) => void;
@@ -20,6 +21,8 @@ interface AuthState {
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   changePassword: (newPassword: string) => Promise<{ error: string | null }>;
+  resetPassword: (email: string) => Promise<{ error: string | null }>;
+  updatePassword: (newPassword: string) => Promise<{ error: string | null }>;
 }
 
 export const useAuthStore = create<AuthState>((set, get) => ({
@@ -29,6 +32,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   superUser: null,
   userType: null,
   loading: true,
+  isRecoveryMode: false,
 
   setSession: (session) => set({ session, user: session?.user ?? null }),
   setProfile: (profile) => set({ profile }),
@@ -46,13 +50,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         await resolveUserType(session.user, supabase, set);
       }
 
-      supabase.auth.onAuthStateChange(async (_event, session) => {
+      supabase.auth.onAuthStateChange(async (event, session) => {
         set({ session, user: session?.user ?? null });
+
+        if (event === 'PASSWORD_RECOVERY') {
+          set({ isRecoveryMode: true });
+          return;
+        }
 
         if (session?.user) {
           await resolveUserType(session.user, supabase, set);
         } else {
-          set({ profile: null, superUser: null, userType: null });
+          set({ profile: null, superUser: null, userType: null, isRecoveryMode: false });
         }
       });
     } catch {
@@ -107,6 +116,31 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         }
       }
 
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  resetPassword: async (email) => {
+    try {
+      const supabase = getSupabaseClient();
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: window.location.origin,
+      });
+      if (error) return { error: error.message };
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  updatePassword: async (newPassword) => {
+    try {
+      const supabase = getSupabaseClient();
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) return { error: error.message };
+      set({ isRecoveryMode: false });
       return { error: null };
     } catch (err) {
       return { error: (err as Error).message };
