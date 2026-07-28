@@ -36,6 +36,7 @@ import LoyaltyNotifications from '../pages/app/LoyaltyNotifications';
 
 import PosDashboard from '../pages/pos/Dashboard';
 import PosStoreSelect from '../pages/pos/StoreSelect';
+import AdminStoreSelect from '../pages/pos/AdminStoreSelect';
 import PosClock from '../pages/pos/Clock';
 import PosChecklists from '../pages/pos/Checklists';
 import PosGoodsIn from '../pages/pos/GoodsIn';
@@ -142,6 +143,7 @@ export default function AppRouter() {
           <Route path="super-users" element={<AdminSuperUsers />} />
           <Route path="plans" element={<AdminPlans />} />
           <Route path="settings" element={<AdminSettings />} />
+          <Route path="*" element={<Navigate to="/admin/dashboard" replace />} />
         </Route>
 
         <Route
@@ -172,6 +174,7 @@ export default function AppRouter() {
           <Route path="help/faq" element={<Faq />} />
         </Route>
 
+        <Route path="/pos/access" element={<AdminStoreSelect />} />
         <Route path="/pos/select-store" element={<PosStoreSelect />} />
         <Route path="/loyalty/register" element={<LoyaltyRegister />} />
 

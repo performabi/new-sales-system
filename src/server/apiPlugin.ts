@@ -28,6 +28,9 @@ export function apiPlugin(): Plugin {
       app.post('/api/users/create', async (req, res) => {
         try {
           const { email, password, username, full_name, role, pin, assigned_store_id, created_by } = req.body;
+          if (!/^\d{4,8}$/.test(String(pin || ''))) {
+            return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+          }
           const supabaseAdmin = getSupabaseAdmin(server);
 
           const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
@@ -74,6 +77,9 @@ export function apiPlugin(): Plugin {
         try {
           const { id } = req.params;
           const { email, password, username, full_name, role, is_active, assigned_store_id, pin } = req.body;
+          if (pin && !/^\d{4,8}$/.test(String(pin))) {
+            return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+          }
           const supabaseAdmin = getSupabaseAdmin(server);
 
           const authUpdates: any = {};
@@ -779,6 +785,45 @@ export function apiPlugin(): Plugin {
           });
         } catch (err) {
           console.error('POS login error:', err);
+          return res.status(500).json({ error: 'Internal server error' });
+        }
+      });
+
+      // ---- POS: Admin PIN Login (checks super_users, accepts store_id) ----
+      app.post('/api/pos/admin-login', async (req, res) => {
+        try {
+          const { pin, store_id, store_name } = req.body;
+          if (!pin || pin.length < 4) {
+            return res.status(400).json({ error: 'PIN required' });
+          }
+          if (!/^\d{4,8}$/.test(String(pin))) {
+            return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+          }
+          if (!store_id) {
+            return res.status(400).json({ error: 'store_id required' });
+          }
+          const pinHash = crypto.createHash('sha256').update(String(pin)).digest('hex');
+          const supabasePublic = getSupabaseAdmin(server, 'public');
+          const { data: su, error } = await supabasePublic
+            .from('super_users')
+            .select('*')
+            .eq('pin_hash', pinHash)
+            .eq('is_active', true)
+            .maybeSingle();
+          if (error) return res.status(500).json({ error: error.message });
+          if (!su) return res.status(401).json({ error: 'Invalid PIN' });
+          return res.json({
+            user: {
+              user_id: su.super_user_id,
+              username: su.email.split('@')[0],
+              full_name: su.full_name,
+              role: 'super_admin',
+              assigned_store_id: store_id,
+              assigned_store_name: store_name || null,
+            },
+          });
+        } catch (err) {
+          console.error('POS admin login error:', err);
           return res.status(500).json({ error: 'Internal server error' });
         }
       });
@@ -1603,6 +1648,20 @@ export function apiPlugin(): Plugin {
         }
       });
 
+      // ---- Admin: list stores for a given tenant schema ----
+      app.get('/api/admin/stores', async (req, res) => {
+        try {
+          const schema = req.query.schema as string;
+          if (!schema) return res.status(400).json({ error: 'schema query param required' });
+          const tenantAdmin = getSupabaseAdmin(server, schema);
+          const { data, error } = await tenantAdmin.from('stores').select('*').eq('is_active', true).order('name');
+          if (error) return res.status(500).json({ error: error.message });
+          return res.json(data);
+        } catch (err) {
+          return res.status(500).json({ error: 'Failed to fetch stores' });
+        }
+      });
+
       // ---- Admin: provision tenant ----
       app.post('/api/admin/provision-tenant', async (req, res) => {
         try {
@@ -1703,6 +1762,26 @@ export function apiPlugin(): Plugin {
           return res.json(data);
         } catch (err) {
           return res.status(500).json({ error: 'Failed to fetch plans' });
+        }
+      });
+
+      // ---- Admin: change PIN (4-8 digits, stored as sha256 hash) ----
+      app.post('/api/admin/settings/change-pin', async (req, res) => {
+        try {
+          const { user_id, pin } = req.body;
+          if (!user_id || !pin) {
+            return res.status(400).json({ error: 'user_id and pin required' });
+          }
+          if (!/^\d{4,8}$/.test(String(pin))) {
+            return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+          }
+          const pinHash = crypto.createHash('sha256').update(String(pin)).digest('hex');
+          const supabaseAdmin = getSupabaseAdmin(server, 'public');
+          const { error: dbError } = await supabaseAdmin.from('super_users').update({ pin_hash: pinHash }).eq('super_user_id', user_id);
+          if (dbError) return res.status(400).json({ error: dbError.message });
+          return res.json({ success: true });
+        } catch (err) {
+          return res.status(500).json({ error: 'Failed to change PIN' });
         }
       });
 

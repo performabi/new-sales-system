@@ -101,7 +101,7 @@ export default function AdminTenantProvision() {
               <option value="">Select a plan…</option>
               {plans.map((p) => (
                 <option key={p.plan_id} value={p.plan_id}>
-                  {p.name} — £{Number(p.price).toFixed(2)}/mo
+                  {p.name}
                 </option>
               ))}
             </select>

@@ -37,6 +37,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(400).json({ error: 'Missing required fields' });
     return;
   }
+  if (!/^\d{4,8}$/.test(String(pin))) {
+    res.status(400).json({ error: 'PIN must be 4-8 digits' });
+    return;
+  }
 
   if (!supabaseUrl || !serviceRole) {
     res.status(500).json({ error: 'Missing Supabase admin credentials' });

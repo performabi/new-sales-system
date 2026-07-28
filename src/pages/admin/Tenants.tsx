@@ -64,7 +64,7 @@ export default function AdminTenants() {
             </thead>
             <tbody>
               {tenants.map((t) => (
-                <tr key={t.tenant_id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/admin/tenants/${t.tenant_id}`)}>
+                <tr key={t.tenant_id}>
                   <td style={{ fontWeight: 600 }}>{t.name}</td>
                   <td style={{ fontFamily: 'monospace', fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t.slug}</td>
                   <td>{t.plan_name || '—'}</td>

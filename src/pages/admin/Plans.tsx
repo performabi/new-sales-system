@@ -38,9 +38,7 @@ export default function AdminPlans() {
               borderTop: plan.name === 'Enterprise' ? '3px solid #088f8f' : '1px solid var(--border-medium)',
             }}>
               <h3 style={{ margin: '0 0 4px' }}>{plan.name}</h3>
-              <div style={{ fontSize: '1.5rem', fontWeight: 700, color: '#088f8f', marginBottom: '16px' }}>
-                £{Number(plan.price).toFixed(2)}<span style={{ fontSize: '0.85rem', fontWeight: 400, color: 'var(--text-muted)' }}>/mo</span>
-              </div>
+              
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', fontSize: '0.9rem' }}>
                 <div>🏪 Up to {plan.max_stores === 999 ? 'unlimited' : plan.max_stores} stores</div>
                 <div>👥 Up to {plan.max_users === 999 ? 'unlimited' : plan.max_users} users</div>

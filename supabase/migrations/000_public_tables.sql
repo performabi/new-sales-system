@@ -14,6 +14,7 @@ CREATE TABLE IF NOT EXISTS public.super_users (
   full_name     TEXT NOT NULL,
   role          TEXT NOT NULL CHECK (role IN ('super_admin', 'support')) DEFAULT 'super_admin',
   is_active     BOOLEAN DEFAULT true,
+  pin_hash      TEXT,
   created_at    TIMESTAMPTZ DEFAULT now(),
   created_by    UUID REFERENCES public.super_users(super_user_id) ON DELETE SET NULL
 );

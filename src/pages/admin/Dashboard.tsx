@@ -105,7 +105,7 @@ export default function AdminDashboard() {
             </thead>
             <tbody>
               {tenants.slice(0, 10).map((t) => (
-                <tr key={t.tenant_id} style={{ cursor: 'pointer' }} onClick={() => navigate(`/admin/tenants/${t.tenant_id}`)}>
+                <tr key={t.tenant_id}>
                   <td style={{ fontWeight: 600 }}>{t.name}</td>
                   <td style={{ fontFamily: 'monospace', fontSize: '0.8rem' }}>{t.schema_name}</td>
                   <td>

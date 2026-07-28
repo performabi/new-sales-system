@@ -26,7 +26,7 @@ export default function Landing() {
       navigate('/admin/dashboard', { replace: true });
     } else if (profile) {
       if (profile.role === 'user') {
-        navigate('/pos/login', { replace: true });
+        navigate('/pos/select-store', { replace: true });
       } else {
         navigate('/app/dashboard', { replace: true });
       }

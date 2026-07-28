@@ -20,7 +20,7 @@ export default function PinPrompt({ isOpen, onClose, onSuccess, title }: PinProm
   const [submitting, setSubmitting] = useState(false);
 
   const handleSubmit = async () => {
-    if (pin.length < 4) return;
+    if (pin.length < 4 || pin.length > 8) return;
     setSubmitting(true);
     setError('');
     try {

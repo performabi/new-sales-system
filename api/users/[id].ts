@@ -45,6 +45,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     try {
       const { email, password, username, full_name, role, is_active, assigned_store_id, pin } = req.body || {};
 
+      if (pin && !/^\d{4,8}$/.test(String(pin))) {
+        return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+      }
+
       const authUpdates: Record<string, string> = {};
       if (email) authUpdates.email = email;
       if (password) authUpdates.password = password;

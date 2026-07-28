@@ -10,6 +10,8 @@ const NAV_ITEMS = [
   { path: '/admin/settings', label: 'Settings', icon: '⚙️' },
 ];
 
+const POS_ITEM = { path: '/pos/access', label: 'POS Access', icon: '🖥️' };
+
 export default function AdminLayout() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -45,7 +47,9 @@ export default function AdminLayout() {
         </div>
 
         <nav style={{ flex: 1, padding: '12px 0' }}>
-          {NAV_ITEMS.map((item) => (
+          {NAV_ITEMS.map((item) => {
+            const isActive = location.pathname === item.path || location.pathname.startsWith(item.path + '/');
+            return (
             <button
               key={item.path}
               onClick={() => navigate(item.path)}
@@ -56,21 +60,22 @@ export default function AdminLayout() {
                 width: '100%',
                 padding: '10px 20px',
                 border: 'none',
-                background: location.pathname === item.path ? 'rgba(255,255,255,0.15)' : 'transparent',
-                color: location.pathname === item.path ? '#fff' : 'rgba(255,255,255,0.8)',
+                background: isActive ? 'rgba(255,255,255,0.15)' : 'transparent',
+                color: isActive ? '#fff' : 'rgba(255,255,255,0.8)',
                 cursor: 'pointer',
                 fontSize: '0.9rem',
                 textAlign: 'left',
                 transition: 'all 0.15s',
-                borderLeft: location.pathname === item.path ? '3px solid #67ffa6' : '3px solid transparent',
+                borderLeft: isActive ? '3px solid #67ffa6' : '3px solid transparent',
               }}
-              onMouseEnter={(e) => { if (location.pathname !== item.path) e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
-              onMouseLeave={(e) => { if (location.pathname !== item.path) e.currentTarget.style.background = 'transparent'; }}
+              onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+              onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
             >
               <span>{item.icon}</span>
               <span>{item.label}</span>
             </button>
-          ))}
+            );
+          })}
         </nav>
 
         <div style={{ padding: '12px 20px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
@@ -109,6 +114,25 @@ export default function AdminLayout() {
           >
             <span>🏢</span>
             <span>Tenant Portal</span>
+          </button>
+          <button
+            onClick={() => navigate(POS_ITEM.path)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '12px',
+              width: '100%',
+              padding: '10px 0',
+              border: 'none',
+              background: location.pathname === POS_ITEM.path ? 'rgba(255,255,255,0.15)' : 'transparent',
+              color: location.pathname === POS_ITEM.path ? '#fff' : 'rgba(255,255,255,0.7)',
+              cursor: 'pointer',
+              fontSize: '0.85rem',
+              borderLeft: location.pathname === POS_ITEM.path ? '3px solid #67ffa6' : '3px solid transparent',
+            }}
+          >
+            <span>{POS_ITEM.icon}</span>
+            <span>{POS_ITEM.label}</span>
           </button>
         </div>
       </aside>
