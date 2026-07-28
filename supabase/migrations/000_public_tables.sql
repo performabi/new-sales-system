@@ -83,20 +83,24 @@ ALTER TABLE public.plans       ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tenants     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.tenant_subscriptions ENABLE ROW LEVEL SECURITY;
 
--- Users can see their own row; existing super_admins can see all rows
+-- Any authenticated user can read super_users (system-team table, not tenant data)
 CREATE POLICY "super_users_read_own" ON public.super_users
   FOR SELECT TO authenticated
-  USING (
-    super_user_id = auth.uid()
-    OR
-    EXISTS (SELECT 1 FROM public.super_users WHERE super_user_id = auth.uid() AND role = 'super_admin')
-  );
+  USING (true);
 
--- Only super_admin can modify super_users
-CREATE POLICY "super_users_admin_modify" ON public.super_users
-  FOR ALL TO authenticated
-  USING (EXISTS (SELECT 1 FROM public.super_users WHERE super_user_id = auth.uid() AND role = 'super_admin'))
-  WITH CHECK (EXISTS (SELECT 1 FROM public.super_users WHERE super_user_id = auth.uid() AND role = 'super_admin'));
+-- Only super_admin can modify super_users (separate policies per operation)
+CREATE POLICY "super_users_insert" ON public.super_users
+  FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() = super_user_id AND role = 'super_admin');
+
+CREATE POLICY "super_users_update" ON public.super_users
+  FOR UPDATE TO authenticated
+  USING (auth.uid() = super_user_id AND role = 'super_admin')
+  WITH CHECK (auth.uid() = super_user_id AND role = 'super_admin');
+
+CREATE POLICY "super_users_delete" ON public.super_users
+  FOR DELETE TO authenticated
+  USING (auth.uid() = super_user_id AND role = 'super_admin');
 
 -- Plans visible to all authenticated super users
 CREATE POLICY "plans_read" ON public.plans
@@ -130,3 +134,9 @@ CREATE POLICY "subscriptions_admin_all" ON public.tenant_subscriptions
   FOR ALL TO authenticated
   USING (EXISTS (SELECT 1 FROM public.super_users WHERE super_user_id = auth.uid() AND role = 'super_admin'))
   WITH CHECK (EXISTS (SELECT 1 FROM public.super_users WHERE super_user_id = auth.uid() AND role = 'super_admin'));
+
+-- =============================================
+-- SCHEMA PERMISSIONS
+-- =============================================
+GRANT USAGE ON SCHEMA public TO authenticated, anon;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO authenticated;
