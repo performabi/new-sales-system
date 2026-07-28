@@ -43,33 +43,31 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const supabase = getSupabaseClient();
 
-      // Subscribe before getSession to catch PASSWORD_RECOVERY event
-      supabase.auth.onAuthStateChange(async (event, session) => {
-        set({ session, user: session?.user ?? null });
-
-        if (event === 'PASSWORD_RECOVERY') {
-          set({ isRecoveryMode: true });
-          return;
-        }
-
-        if (session?.user) {
-          await resolveUserType(session.user, supabase, set);
-        } else {
-          set({ profile: null, superUser: null, userType: null, isRecoveryMode: false });
-        }
-      });
-
       const { data: { session } } = await supabase.auth.getSession();
       set({ session, user: session?.user ?? null });
 
       if (session?.user) {
-        // Check URL hash directly as fallback (event may have already fired)
-        if (window.location.hash.includes('type=recovery')) {
-          set({ isRecoveryMode: true });
-        } else {
-          await resolveUserType(session.user, supabase, set);
-        }
+        await resolveUserType(session.user, supabase, set);
       }
+
+      supabase.auth.onAuthStateChange(async (event, session) => {
+        try {
+          set({ session, user: session?.user ?? null });
+
+          if (event === 'PASSWORD_RECOVERY') {
+            set({ isRecoveryMode: true });
+            return;
+          }
+
+          if (session?.user) {
+            await resolveUserType(session.user, supabase, set);
+          } else {
+            set({ profile: null, superUser: null, userType: null, isRecoveryMode: false });
+          }
+        } catch {
+          console.warn('onAuthStateChange handler failed.');
+        }
+      });
     } catch {
       console.warn('Auth initialization failed.');
     } finally {

@@ -35,6 +35,7 @@ export default function ResetPassword() {
     }
 
     setSuccess(true);
+    setTimeout(() => navigate('/'), 1500);
   };
 
   if (success) {
@@ -46,9 +47,7 @@ export default function ResetPassword() {
           <p style={{ color: 'var(--text-muted)', marginTop: '8px', marginBottom: '24px' }}>
             Your password has been updated successfully.
           </p>
-          <button className="btn btn-primary" onClick={() => navigate('/')} style={{ width: '100%' }}>
-            Continue to Login
-          </button>
+          <p style={{ fontSize: '0.85rem', color: 'var(--primary)' }}>Redirecting...</p>
         </div>
       </div>
     );

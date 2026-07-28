@@ -38,10 +38,8 @@ export default function Landing() {
     setError(null);
     setIsSubmitting(true);
     const { error: err } = await signIn(email, password);
-    if (err) {
-      setError(err);
-      setIsSubmitting(false);
-    }
+    setIsSubmitting(false);
+    if (err) setError(err);
   };
 
   const handleLogout = async () => {
