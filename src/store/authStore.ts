@@ -87,9 +87,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const supabase = getSupabaseClient();
       await supabase.auth.signOut();
-    } catch {
-      // ignore
+    } catch (err) {
+      console.warn('Sign out error:', err);
     }
+    sessionStorage.removeItem('pos_session');
+    sessionStorage.removeItem('pos_store_id');
+    sessionStorage.removeItem('pos_store_name');
     set({ session: null, user: null, profile: null });
   },
 

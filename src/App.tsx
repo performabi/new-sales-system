@@ -1,8 +1,13 @@
 // src/App.tsx
 import AppRouter from './routes/AppRouter';
+import ErrorBoundary from './components/UI/ErrorBoundary';
 
 function App() {
-  return <AppRouter />;
+  return (
+    <ErrorBoundary>
+      <AppRouter />
+    </ErrorBoundary>
+  );
 }
 
 

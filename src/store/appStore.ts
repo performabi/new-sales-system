@@ -1,7 +1,8 @@
 // src/store/appStore.ts
 import { create } from 'zustand';
-import type { Store, UserProfile, InventoryItem, Toast, PluCategory, Plu } from '../types';
+import type { Store, UserProfile, InventoryItem, Toast, PluCategory, Plu, Supplier, PurchaseOrder, ItemSizing, SupplierProductWithPlu, SuggestedPO, LoyaltyCard, CurrencyConfig, LoyaltyNotification } from '../types';
 import { getSupabaseClient } from '../lib/supabaseClient';
+import { useAuthStore } from './authStore';
 
 export interface LogEntry {
   id: string;
@@ -12,6 +13,7 @@ export interface LogEntry {
   oldValue: string;
   newValue: string;
   username: string;        // who made the change
+  action?: 'create' | 'edit' | 'delete';
 }
 
 interface AppState {
@@ -81,7 +83,112 @@ interface AppState {
   // PLU Scheduled Changes
   schedulePluChange: (pluId: string, payload: Record<string, any>, scheduledAt: string, createdBy: string) => Promise<{ error: string | null }>;
   applyDueScheduledChanges: () => Promise<void>;
+
+  // Suppliers
+  suppliers: Supplier[];
+  suppliersLoading: boolean;
+  fetchSuppliers: () => Promise<void>;
+  addSupplier: (data: Omit<Supplier, 'supplier_id' | 'created_at'>) => Promise<{ error: string | null }>;
+  updateSupplier: (id: string, data: Partial<Supplier>) => Promise<{ error: string | null }>;
+
+  // Item Sizing
+  itemSizing: ItemSizing[];
+  itemSizingLoading: boolean;
+  fetchItemSizing: () => Promise<void>;
+  createItemSizing: (data: { unit_type: 'each' | 'kg'; units_per_pack: number; packs_per_case: number }) => Promise<{ error: string | null }>;
+  updateItemSizing: (id: string, data: { unit_type: 'each' | 'kg'; units_per_pack: number; packs_per_case: number }) => Promise<{ error: string | null }>;
+  deleteItemSizing: (id: string) => Promise<{ error: string | null }>;
+
+  // Purchase Orders
+  purchaseOrders: PurchaseOrder[];
+  purchaseOrdersLoading: boolean;
+  fetchPurchaseOrders: () => Promise<void>;
+  savePoDraft: (data: { supplier_id: string; store_id: string; items: { plu_id: string; quantity_ordered: number; cost_price_at_order: number }[]; created_by?: string }) => Promise<{ error: string | null }>;
+  lockPurchaseOrder: (id: string) => Promise<{ error: string | null }>;
+
+  // PO Auto-Suggestions
+  poSuggestions: SuggestedPO[];
+  poSuggestionsLoading: boolean;
+  fetchPoSuggestions: (storeId: string) => Promise<void>;
+  clearSuggestions: () => void;
+
+  // Supplier Products
+  supplierProducts: SupplierProductWithPlu[];
+  supplierProductsLoading: boolean;
+  fetchSupplierProducts: (supplierId: string) => Promise<void>;
+  linkSupplierProduct: (data: { supplier_id: string; plu_id: string; supplier_sku?: string; cost_price: number; is_preferred: boolean; lead_time_days: number }) => Promise<{ error: string | null }>;
+  unlinkSupplierProduct: (id: string) => Promise<{ error: string | null }>;
+
+  // Clock
+  clockStatus: any[];
+  clockStatusLoading: boolean;
+  fetchClockStatus: (userId: string) => Promise<void>;
+  clockIn: (storeId: string, userId: string) => Promise<{ error: string | null }>;
+  clockOut: (userId: string) => Promise<{ error: string | null }>;
+
+  // Checklists (POS)
+  checklists: any[];
+  checklistsLoading: boolean;
+  fetchChecklists: (storeId: string, type?: string) => Promise<void>;
+
+  // Checklists (HO)
+  addChecklistTask: (data: { store_id: string; type: string; task_name: string; sort_order?: number }) => Promise<{ error: string | null }>;
+  updateChecklistTask: (id: string, data: { task_name?: string; sort_order?: number; type?: string }) => Promise<{ error: string | null }>;
+  deleteChecklistTask: (id: string) => Promise<{ error: string | null }>;
+
+  // Goods In
+  pendingPOs: any[];
+  pendingPOsLoading: boolean;
+  fetchPendingPOs: (storeId: string) => Promise<void>;
+  receiveDelivery: (poId: string, items: { plu_id: string; qty_received: number }[]) => Promise<{ error: string | null }>;
+
+  // Currency Config
+  currencyConfig: CurrencyConfig | null;
+  fetchCurrencyConfig: () => Promise<void>;
+  updateCurrencyConfig: (config: CurrencyConfig) => Promise<void>;
+
+  // Loyalty Cards
+  loyaltyCards: LoyaltyCard[];
+  loyaltyCardsLoading: boolean;
+  fetchLoyaltyCards: () => Promise<void>;
+  createLoyaltyCard: (data: { customer_name: string; phone?: string; email?: string; postcode?: string; cashback_balance?: number; store_id?: string }) => Promise<{ card_number?: string } | undefined>;
+  updateLoyaltyCard: (id: string, data: Partial<LoyaltyCard>) => Promise<void>;
+  lookupLoyaltyCard: (code: string) => Promise<LoyaltyCard | null>;
+
+  // Cashback Percent
+  cashbackPercent: number | null;
+  fetchCashbackPercent: () => Promise<void>;
+  updateCashbackPercent: (percent: number) => Promise<void>;
+
+  // Loyalty Notifications
+  loyaltyNotifications: LoyaltyNotification[];
+  loyaltyNotificationsLoading: boolean;
+  fetchLoyaltyNotifications: () => Promise<void>;
+  createNotification: (data: { title: string; body: string; store_id?: string }) => Promise<{ error: string | null }>;
+  sendNotification: (id: string) => Promise<{ error: string | null }>;
+  unseenNotifications: LoyaltyNotification[];
+  fetchUnseenNotifications: (storeId: string) => Promise<void>;
+
+  // Basket / Cart
+  basketTabs: any[];
+  activeTabId: string | null;
+  openNewBasket: (staffUserId: string, staffName: string) => void;
+  switchBasket: (tabId: string) => void;
+  closeBasket: (tabId: string) => void;
+  addToBasket: (item: any) => void;
+  updateBasketItemQty: (pluId: string, qty: number) => void;
+  removeFromBasket: (pluId: string) => void;
+  setBasketDiscount: (tabId: string, amount: number) => void;
+  setBasketLoyalty: (tabId: string, cardId: string, customerName: string, cashback: number) => void;
+
+  // Sales
+  saleTransactions: any[];
+  saleTransactionsLoading: boolean;
+  fetchSaleTransactions: (storeId: string, date?: string) => Promise<void>;
+  createSale: (data: any) => Promise<{ error: string | null; transaction?: any }>;
+  voidSale: (transactionId: string) => Promise<{ error: string | null }>;
 }
+
 
 let toastId = 0;
 let logId = 0;
@@ -116,7 +223,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   addStore: async (store) => {
     try {
       const supabase = getSupabaseClient();
-      const { useAuthStore } = await import('./authStore');
       const userId = useAuthStore.getState().profile?.user_id || null;
 
       // Calculate next sequential 3-digit store number (e.g. "001", "002"...)
@@ -140,6 +246,26 @@ export const useAppStore = create<AppState>((set, get) => ({
         .single();
       if (error) return { error: error.message };
       set((s) => ({ stores: [data as Store, ...s.stores].sort((a, b) => (a.store_number ?? '').localeCompare(b.store_number ?? '')) }));
+      const logFields: { field: string; value: string }[] = [
+        { field: 'name', value: store.name },
+        { field: 'address', value: store.address },
+        { field: 'postcode', value: store.postcode },
+        { field: 'vat_number', value: store.vat_number },
+        { field: 'store_number', value: nextStoreNumber },
+      ];
+      if (store.is_active !== undefined) {
+        logFields.push({ field: 'is_active', value: String(store.is_active) });
+      }
+      for (const { field, value } of logFields) {
+        await get().addLogEntry({
+          entity: 'Store',
+          entityLabel: store.name,
+          field,
+          oldValue: '',
+          newValue: value,
+          action: 'create',
+        });
+      }
       get().addToast('success', `Store "${store.name}" (No. ${nextStoreNumber}) created successfully`);
       return { error: null };
     } catch (err) {
@@ -166,7 +292,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (oldStore) {
         for (const key of Object.keys(data) as (keyof typeof data)[]) {
           const oldVal = String(oldStore[key as keyof Store] ?? '');
-          const newVal = String((data as any)[key] ?? '');
+          const newVal = String(data[key] ?? '');
           if (oldVal !== newVal) {
             await get().addLogEntry({
               entity: 'Store',
@@ -174,6 +300,7 @@ export const useAppStore = create<AppState>((set, get) => ({
               field: key as string,
               oldValue: oldVal,
               newValue: newVal,
+              action: 'edit',
             });
           }
         }
@@ -202,6 +329,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           field: '[DELETED]',
           oldValue: deletedStore.name,
           newValue: '',
+          action: 'delete',
         });
       }
       set((s) => ({ stores: s.stores.filter((st) => st.store_id !== id) }));
@@ -241,7 +369,6 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   addUser: async (userData) => {
     try {
-      const { useAuthStore } = await import('./authStore');
       const createdById = useAuthStore.getState().profile?.user_id || null;
       // Use our custom Vite API route which uses the service_role key
       // This bypasses the "Allow new users to sign up" toggle in Supabase
@@ -259,6 +386,24 @@ export const useAppStore = create<AppState>((set, get) => ({
         return { error: result.error || 'Failed to create user' };
       }
 
+      const logFields: { field: string; value: string }[] = [
+        { field: 'username', value: userData.username },
+        { field: 'full_name', value: userData.full_name },
+        { field: 'role', value: userData.role },
+      ];
+      if (userData.assigned_store_id) {
+        logFields.push({ field: 'assigned_store_id', value: userData.assigned_store_id });
+      }
+      for (const { field, value } of logFields) {
+        await get().addLogEntry({
+          entity: 'User',
+          entityLabel: userData.full_name || userData.username,
+          field,
+          oldValue: '',
+          newValue: value,
+          action: 'create',
+        });
+      }
       get().addToast('success', `User "${userData.username}" created successfully`);
       await get().fetchUsers();
       return { error: null };
@@ -289,8 +434,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         const loggableKeys = ['full_name', 'username', 'role', 'is_active', 'assigned_store_id'] as const;
         for (const key of loggableKeys) {
           if (key in data) {
-            const oldVal = String((oldUser as any)[key] ?? '');
-            const newVal = String((data as any)[key] ?? '');
+            const oldVal = String(oldUser[key as keyof typeof oldUser] ?? '');
+            const newVal = String(data[key as keyof typeof data] ?? '');
             if (oldVal !== newVal) {
               await get().addLogEntry({
                 entity: 'User',
@@ -298,6 +443,7 @@ export const useAppStore = create<AppState>((set, get) => ({
                 field: key,
                 oldValue: oldVal,
                 newValue: newVal,
+                action: 'edit',
               });
             }
           }
@@ -334,6 +480,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           field: '[DELETED]',
           oldValue: `${deletedUser.username} (${deletedUser.role})`,
           newValue: '',
+          action: 'delete',
         });
       }
       set((s) => ({ users: s.users.filter((u) => u.user_id !== id) }));
@@ -365,6 +512,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           field: 'password',
           oldValue: '(hidden)',
           newValue: '[RESET]',
+          action: 'edit',
         });
       }
       get().addToast('success', 'Password reset to Sales12345');
@@ -415,8 +563,20 @@ export const useAppStore = create<AppState>((set, get) => ({
         .select('*')
         .order('name');
       if (error) throw error;
-      const mapped = (data as any[] ?? []).map((cat) => ({
+      const userIds = [...new Set(((data as unknown) as PluCategory[] ?? []).map((c) => c.created_by).filter(Boolean))];
+      let userMap = new Map<string, string>();
+      if (userIds.length > 0) {
+        const { data: users } = await supabase
+          .from('users')
+          .select('user_id, username')
+          .in('user_id', userIds);
+        if (users) {
+          userMap = new Map(users.map((u: any) => [u.user_id, u.username]));
+        }
+      }
+      const mapped = ((data as unknown) as PluCategory[] ?? []).map((cat) => ({
         ...cat,
+        creator_username: cat.created_by ? (userMap.get(cat.created_by) ?? null) : null,
       })) as PluCategory[];
       set({ pluCategories: mapped });
     } catch (err) {
@@ -429,10 +589,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   addPluCategory: async (name) => {
     try {
-      // Import/fetch auth profile to check who is creating the category
-      const { useAuthStore } = await import('./authStore');
-      const userId = useAuthStore.getState().profile?.user_id || null;
-
+      const profile = useAuthStore.getState().profile;
+      const userId = profile?.user_id || null;
       const response = await fetch('/api/plu_categories/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -442,7 +600,15 @@ export const useAppStore = create<AppState>((set, get) => ({
       if (!response.ok) {
         return { error: result.error || 'Failed to create category' };
       }
-      // Refresh list
+      await get().addLogEntry({
+        entity: 'Category',
+        entityLabel: name,
+        field: 'name',
+        oldValue: '',
+        newValue: name,
+        action: 'create',
+      });
+      // Refresh categories
       await get().fetchPluCategories();
       get().addToast('success', `Category "${name}" created`);
       return { error: null };
@@ -470,6 +636,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           field: 'name',
           oldValue: oldCat.name,
           newValue: name,
+          action: 'edit',
         });
       }
       // Refresh list
@@ -499,6 +666,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           field: '[DELETED]',
           oldValue: deletedCat.name,
           newValue: '',
+          action: 'delete',
         });
       }
       // Refresh list
@@ -539,31 +707,37 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   addPlu: async (data) => {
     try {
-      const supabase = getSupabaseClient();
-      const { useAuthStore } = await import('./authStore');
       const userId = useAuthStore.getState().profile?.user_id || null;
-      // Check uniqueness
-      const { count } = await supabase
-        .from('plu')
-        .select('plu_id', { count: 'exact', head: true })
-        .eq('plu_number', data.plu_number);
-      if ((count ?? 0) > 0) {
-        return { error: `PLU number "${data.plu_number}" already exists. Please use a different number.` };
-      }
-      const { data: inserted, error } = await supabase
-        .from('plu')
-        .insert({ ...data, created_by: userId })
-        .select('*, plu_categories(name)')
-        .single();
-      if (error) return { error: error.message };
-      const newItem = {
-        ...inserted,
-        category_name: (inserted as any).plu_categories?.name ?? null,
-        plu_categories: undefined,
-      } as Plu;
-      set((s) => ({ plusItems: [...s.plusItems, newItem] }));
-      get().addToast('success', `PLU "${data.plu_number}, ${data.name}" created`);
 
+      const response = await fetch('/api/plu/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...data, created_by: userId }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        return { error: result.error || 'Failed to create PLU' };
+      }
+      const pluLogFields: { field: string; value: string }[] = [
+        { field: 'plu_number', value: data.plu_number },
+        { field: 'name', value: data.name },
+      ];
+      if (data.category_id) pluLogFields.push({ field: 'category_id', value: data.category_id });
+      if (data.vat_class) pluLogFields.push({ field: 'vat_class', value: data.vat_class });
+      if (data.headoffice_price != null) pluLogFields.push({ field: 'headoffice_price', value: String(data.headoffice_price) });
+      for (const { field, value } of pluLogFields) {
+        await get().addLogEntry({
+          entity: 'PLU',
+          entityLabel: `${data.plu_number}, ${data.name}`,
+          field,
+          oldValue: '',
+          newValue: value,
+          action: 'create',
+        });
+      }
+      // Refresh list
+      await get().fetchPlus();
+      get().addToast('success', `PLU "${data.plu_number}, ${data.name}" created`);
       return { error: null };
     } catch (err) {
       return { error: (err as Error).message };
@@ -572,41 +746,20 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   updatePlu: async (id, data) => {
     try {
-      const supabase = getSupabaseClient();
-      const oldPlu = get().plusItems.find((p) => p.plu_id === id);
-      // If plu_number is changing, check uniqueness
-      if (data.plu_number) {
-        const { count } = await supabase
-          .from('plu')
-          .select('plu_id', { count: 'exact', head: true })
-          .eq('plu_number', data.plu_number)
-          .neq('plu_id', id);
-        if ((count ?? 0) > 0) {
-          return { error: `PLU number "${data.plu_number}" already exists.` };
-        }
+      const username = useAuthStore.getState().profile?.username ?? 'system';
+      const payload = { ...data, username };
+      const response = await fetch(`/api/plu/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        return { error: result.error || 'Failed to update PLU' };
       }
-      const { error } = await supabase.from('plu').update(data).eq('plu_id', id);
-      if (error) return { error: error.message };
-      // Log each changed field
-      if (oldPlu) {
-        for (const key of Object.keys(data) as (keyof typeof data)[]) {
-          const oldVal = String((oldPlu as any)[key] ?? '');
-          const newVal = String((data as any)[key] ?? '');
-          if (oldVal !== newVal) {
-            await get().addLogEntry({
-              entity: 'PLU',
-              entityLabel: `${oldPlu.plu_number}, ${oldPlu.name}`,
-
-              field: key as string,
-              oldValue: oldVal,
-              newValue: newVal,
-            });
-          }
-        }
-      }
-      // Refresh category name if category changed
+      // Refresh list after successful update
       await get().fetchPlus();
-      get().addToast('success', 'PLU updated successfully');
+      get().addToast('success', 'PLU has been updated.');
       return { error: null };
     } catch (err) {
       return { error: (err as Error).message };
@@ -615,21 +768,27 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   deletePlu: async (id) => {
     try {
-      const supabase = getSupabaseClient();
       const deletedPlu = get().plusItems.find((p) => p.plu_id === id);
-      const { error } = await supabase.from('plu').delete().eq('plu_id', id);
-      if (error) return { error: error.message };
+      const response = await fetch(`/api/plu/${id}`, {
+        method: 'DELETE',
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        return { error: result.error || 'Failed to delete PLU' };
+      }
+      // Optimistically remove from local state
+      set((s) => ({ plusItems: s.plusItems.filter((p) => p.plu_id !== id) }));
       // Log deletion
       if (deletedPlu) {
         await get().addLogEntry({
           entity: 'PLU',
           entityLabel: `${deletedPlu.plu_number}, ${deletedPlu.name}`,
           field: '[DELETED]',
-          oldValue: `${deletedPlu.plu_number} - ${deletedPlu.name}`,
+          oldValue: `${deletedPlu.plu_number} (${deletedPlu.name})`,
           newValue: '',
+          action: 'delete',
         });
       }
-      set((s) => ({ plusItems: s.plusItems.filter((p) => p.plu_id !== id) }));
       get().addToast('success', 'PLU deleted');
       return { error: null };
     } catch (err) {
@@ -674,8 +833,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const res = await fetch('/api/logbook');
       if (!res.ok) { console.error('Failed to fetch logbook', res.status); return; }
-      const rows = await res.json() as any[];
-      const mapped: LogEntry[] = rows.map((r) => ({
+      const rows = await res.json();
+      type LogbookRow = { id: string; timestamp: string; entity: string; entity_label: string; field: string; old_value: string | null; new_value: string | null; username: string; action?: string | null };
+      const seen = new Set<string>();
+      const mapped: LogEntry[] = (rows as LogbookRow[]).filter((r) => {
+        if (seen.has(r.id)) return false;
+        seen.add(r.id);
+        return true;
+      }).map((r) => ({
         id: r.id,
         timestamp: r.timestamp,
         entity: r.entity,
@@ -684,6 +849,9 @@ export const useAppStore = create<AppState>((set, get) => ({
         oldValue: r.old_value ?? '',
         newValue: r.new_value ?? '',
         username: r.username,
+        action: r.action
+          ? (r.action as 'create' | 'edit' | 'delete')
+          : (r.field === '[DELETED]' ? 'delete' as const : 'edit' as const),
       }));
       set({ logEntries: mapped });
     } catch (err) {
@@ -694,7 +862,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   addLogEntry: async (entry) => {
-    const { useAuthStore } = await import('./authStore');
     const username = useAuthStore.getState().profile?.username ?? 'Unknown';
     const newEntry: LogEntry = {
       id: String(++logId),
@@ -718,10 +885,11 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   exportLogCsv: () => {
     const entries = get().logEntries;
-    const headers = ['Date/Time', 'User', 'Entity', 'Record', 'Field', 'Old Value', 'New Value'];
+    const headers = ['Date/Time', 'User', 'Action', 'Entity', 'Record', 'Field', 'Old Value', 'New Value'];
     const rows = entries.map((e) => [
       new Date(e.timestamp).toLocaleString('en-GB'),
       e.username,
+      e.action || 'edit',
       e.entity,
       e.entityLabel,
       e.field,
@@ -761,7 +929,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const res = await fetch('/api/plu_scheduled_changes/due');
       if (!res.ok) return;
-      const due = await res.json() as any[];
+      const due = await res.json() as { id: string; plu_id: string; payload: Record<string, unknown> }[];
       if (!due.length) return;
       for (const sc of due) {
         const { error } = await get().updatePlu(sc.plu_id, sc.payload);
@@ -771,8 +939,769 @@ export const useAppStore = create<AppState>((set, get) => ({
           get().addToast('success', `Scheduled PLU change applied ✔`);
         }
       }
+    } catch {
+      // Network errors expected during server restart — retry next interval
+    }
+  },
+
+  // ---------- Suppliers ----------
+  suppliers: [],
+  suppliersLoading: false,
+
+  fetchSuppliers: async () => {
+    set({ suppliersLoading: true });
+    try {
+      const res = await fetch('/api/suppliers');
+      if (!res.ok) throw new Error('Failed to load suppliers');
+      const data = await res.json();
+      set({ suppliers: data });
     } catch (err) {
-      console.error('applyDueScheduledChanges error:', err);
+      console.error('fetchSuppliers error:', err);
+      get().addToast('error', 'Failed to load suppliers');
+    } finally {
+      set({ suppliersLoading: false });
+    }
+  },
+
+  addSupplier: async (data) => {
+    try {
+      const username = useAuthStore.getState().profile?.username ?? 'system';
+      const payload = { ...data, username };
+      const res = await fetch('/api/suppliers/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const result = await res.json();
+      if (!res.ok) return { error: result.error || 'Failed to create supplier' };
+      get().addToast('success', `Supplier "${data.name}" created`);
+      await get().fetchSuppliers();
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  updateSupplier: async (id, data) => {
+    try {
+      const username = useAuthStore.getState().profile?.username ?? 'system';
+      const payload = { ...data, username };
+      const res = await fetch(`/api/suppliers/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const result = await res.json();
+      if (!res.ok) return { error: result.error || 'Failed to update supplier' };
+      get().addToast('success', `Supplier updated successfully`);
+      await get().fetchSuppliers();
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  // ---------- Item Sizing ----------
+  itemSizing: [],
+  itemSizingLoading: false,
+
+  fetchItemSizing: async () => {
+    set({ itemSizingLoading: true });
+    try {
+      const res = await fetch('/api/item-sizing');
+      if (!res.ok) throw new Error('Failed to load item sizing');
+      const data = await res.json();
+      set({ itemSizing: data });
+    } catch (err) {
+      console.error('fetchItemSizing error:', err);
+      get().addToast('error', 'Failed to load item sizing');
+    } finally {
+      set({ itemSizingLoading: false });
+    }
+  },
+
+  createItemSizing: async (sizingData) => {
+    try {
+      const res = await fetch('/api/item-sizing/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sizingData),
+      });
+      const result = await res.json();
+      if (!res.ok) return { error: result.error || 'Failed to create item sizing' };
+      const name = `${sizingData.packs_per_case} × ${sizingData.units_per_pack} ${sizingData.unit_type}`;
+      const logFields = [
+        { field: 'unit_type', value: sizingData.unit_type },
+        { field: 'units_per_pack', value: String(sizingData.units_per_pack) },
+        { field: 'packs_per_case', value: String(sizingData.packs_per_case) },
+      ];
+      for (const { field, value } of logFields) {
+        await get().addLogEntry({
+          entity: 'Item Sizing',
+          entityLabel: name,
+          field,
+          oldValue: '',
+          newValue: value,
+          action: 'create',
+        });
+      }
+      get().addToast('success', 'Item sizing created');
+      await get().fetchItemSizing();
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  updateItemSizing: async (id, sizingData) => {
+    try {
+      const old = get().itemSizing.find((s) => s.id === id);
+      const res = await fetch(`/api/item-sizing/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(sizingData),
+      });
+      const result = await res.json();
+      if (!res.ok) return { error: result.error || 'Failed to update item sizing' };
+      if (old) {
+        const loggableKeys = ['unit_type', 'units_per_pack', 'packs_per_case'] as const;
+        for (const key of loggableKeys) {
+          if (String(old[key]) !== String(sizingData[key])) {
+            await get().addLogEntry({
+              entity: 'Item Sizing',
+              entityLabel: `${old.packs_per_case} × ${old.units_per_pack} ${old.unit_type}`,
+              field: key,
+              oldValue: String(old[key]),
+              newValue: String(sizingData[key]),
+              action: 'edit',
+            });
+          }
+        }
+      }
+      get().addToast('success', 'Item sizing updated');
+      await get().fetchItemSizing();
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  deleteItemSizing: async (id) => {
+    try {
+      const deleted = get().itemSizing.find((s) => s.id === id);
+      const res = await fetch(`/api/item-sizing/${id}`, {
+        method: 'DELETE',
+      });
+      const result = await res.json();
+      if (!res.ok) return { error: result.error || 'Failed to delete item sizing' };
+      if (deleted) {
+        await get().addLogEntry({
+          entity: 'Item Sizing',
+          entityLabel: `${deleted.packs_per_case} × ${deleted.units_per_pack} ${deleted.unit_type}`,
+          field: '[DELETED]',
+          oldValue: `${deleted.packs_per_case} × ${deleted.units_per_pack} ${deleted.unit_type}`,
+          newValue: '',
+          action: 'delete',
+        });
+      }
+      set((s) => ({ itemSizing: s.itemSizing.filter((sizing) => sizing.id !== id) }));
+      get().addToast('success', 'Item sizing deleted');
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  // ---------- Purchase Orders ----------
+  purchaseOrders: [],
+  purchaseOrdersLoading: false,
+
+  fetchPurchaseOrders: async () => {
+    set({ purchaseOrdersLoading: true });
+    try {
+      const res = await fetch('/api/purchase-orders');
+      if (!res.ok) throw new Error('Failed to load purchase orders');
+      const data = await res.json();
+      set({ purchaseOrders: data });
+    } catch (err) {
+      console.error('fetchPurchaseOrders error:', err);
+      get().addToast('error', 'Failed to load purchase orders');
+    } finally {
+      set({ purchaseOrdersLoading: false });
+    }
+  },
+
+  savePoDraft: async (data) => {
+    try {
+      const res = await fetch('/api/purchase-orders/save-draft', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const result = await res.json();
+      if (!res.ok) return { error: result.error || 'Failed to save PO draft' };
+      get().addToast('success', `Purchase order draft saved`);
+      await get().fetchPurchaseOrders();
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  lockPurchaseOrder: async (id) => {
+    try {
+      const res = await fetch(`/api/purchase-orders/${id}/lock`, {
+        method: 'PUT',
+      });
+      const result = await res.json();
+      if (!res.ok) return { error: result.error || 'Failed to finalize purchase order' };
+      get().addToast('success', `Purchase order locked & finalized`);
+      await get().fetchPurchaseOrders();
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  // ---------- PO Auto-Suggestions ----------
+  poSuggestions: [],
+  poSuggestionsLoading: false,
+
+  fetchPoSuggestions: async (storeId) => {
+    set({ poSuggestionsLoading: true, poSuggestions: [] });
+    try {
+      const res = await fetch('/api/purchase-orders/suggestions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ store_id: storeId }),
+      });
+      if (!res.ok) throw new Error('Failed to generate suggestions');
+      const data = await res.json();
+      set({ poSuggestions: data.suggestions ?? [] });
+    } catch (err) {
+      console.error('fetchPoSuggestions error:', err);
+      get().addToast('error', 'Failed to generate PO suggestions');
+    } finally {
+      set({ poSuggestionsLoading: false });
+    }
+  },
+
+  clearSuggestions: () => {
+    set({ poSuggestions: [] });
+  },
+
+  // ---------- Supplier Products ----------
+  supplierProducts: [],
+  supplierProductsLoading: false,
+
+  fetchSupplierProducts: async (supplierId) => {
+    set({ supplierProductsLoading: true });
+    try {
+      const res = await fetch(`/api/supplier-products?supplier_id=${encodeURIComponent(supplierId)}`);
+      if (!res.ok) throw new Error('Failed to load supplier products');
+      const data = await res.json();
+      set({ supplierProducts: data });
+    } catch (err) {
+      console.error('fetchSupplierProducts error:', err);
+      get().addToast('error', 'Failed to load supplier products');
+    } finally {
+      set({ supplierProductsLoading: false });
+    }
+  },
+
+  linkSupplierProduct: async (data) => {
+    try {
+      const res = await fetch('/api/supplier-products/link', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const result = await res.json();
+      if (!res.ok) return { error: result.error || 'Failed to link product' };
+      get().addToast('success', 'Product linked to supplier');
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  unlinkSupplierProduct: async (id) => {
+    try {
+      const res = await fetch(`/api/supplier-products/${id}`, {
+        method: 'DELETE',
+      });
+      const result = await res.json();
+      if (!res.ok) return { error: result.error || 'Failed to unlink product' };
+      get().addToast('success', 'Product unlinked from supplier');
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  // ---------- Clock ----------
+  clockStatus: [],
+  clockStatusLoading: false,
+
+  fetchClockStatus: async (userId) => {
+    set({ clockStatusLoading: true });
+    try {
+      const res = await fetch(`/api/pos/clock-status?user_id=${encodeURIComponent(userId)}`);
+      if (!res.ok) throw new Error('Failed to fetch clock status');
+      const data = await res.json();
+      set({ clockStatus: data });
+    } catch (err) {
+      console.error('fetchClockStatus error:', err);
+    } finally {
+      set({ clockStatusLoading: false });
+    }
+  },
+
+  clockIn: async (storeId, userId) => {
+    try {
+      const res = await fetch('/api/pos/clock-in', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ store_id: storeId, user_id: userId }),
+      });
+      const result = await res.json();
+      if (!res.ok) return { error: result.error || 'Failed to clock in' };
+      get().addToast('success', 'Clocked in');
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  clockOut: async (userId) => {
+    try {
+      const res = await fetch('/api/pos/clock-out', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: userId }),
+      });
+      const result = await res.json();
+      if (!res.ok) return { error: result.error || 'Failed to clock out' };
+      get().addToast('success', 'Clocked out');
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  // ---------- Checklists (POS) ----------
+  checklists: [],
+  checklistsLoading: false,
+
+  fetchChecklists: async (storeId, type) => {
+    set({ checklistsLoading: true });
+    try {
+      let url = `/api/checklists?store_id=${encodeURIComponent(storeId)}`;
+      if (type) url += `&type=${encodeURIComponent(type)}`;
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('Failed to fetch checklists');
+      const data = await res.json();
+      set({ checklists: data });
+    } catch (err) {
+      console.error('fetchChecklists error:', err);
+    } finally {
+      set({ checklistsLoading: false });
+    }
+  },
+
+  // ---------- Checklists (HO) ----------
+  addChecklistTask: async (data) => {
+    try {
+      const res = await fetch('/api/checklists/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const result = await res.json();
+      if (!res.ok) return { error: result.error || 'Failed to create task' };
+      get().addToast('success', 'Checklist task created');
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  updateChecklistTask: async (id, data) => {
+    try {
+      const res = await fetch(`/api/checklists/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const result = await res.json();
+      if (!res.ok) return { error: result.error || 'Failed to update task' };
+      get().addToast('success', 'Checklist task updated');
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  deleteChecklistTask: async (id) => {
+    try {
+      const res = await fetch(`/api/checklists/${id}`, {
+        method: 'DELETE',
+      });
+      const result = await res.json();
+      if (!res.ok) return { error: result.error || 'Failed to delete task' };
+      get().addToast('success', 'Checklist task deleted');
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  // ---------- Goods In ----------
+  pendingPOs: [],
+  pendingPOsLoading: false,
+
+  fetchPendingPOs: async (storeId) => {
+    set({ pendingPOsLoading: true });
+    try {
+      const res = await fetch(`/api/purchase-orders/pending?store_id=${encodeURIComponent(storeId)}`);
+      if (!res.ok) throw new Error('Failed to fetch pending POs');
+      const data = await res.json();
+      set({ pendingPOs: data });
+    } catch (err) {
+      console.error('fetchPendingPOs error:', err);
+      get().addToast('error', 'Failed to load pending deliveries');
+    } finally {
+      set({ pendingPOsLoading: false });
+    }
+  },
+
+  receiveDelivery: async (poId, items) => {
+    try {
+      const res = await fetch('/api/purchase-orders/receive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ po_id: poId, items }),
+      });
+      const result = await res.json();
+      if (!res.ok) return { error: result.error || 'Failed to receive delivery' };
+      get().addToast('success', 'Delivery received');
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message };
+    }
+  },
+
+  // ---------- Currency Config ----------
+  currencyConfig: null,
+
+  fetchCurrencyConfig: async () => {
+    try {
+      const res = await fetch('/api/settings/currency');
+      if (!res.ok) return;
+      const data = await res.json();
+      set({ currencyConfig: data });
+    } catch (err) {
+      console.error('fetchCurrencyConfig error:', err);
+    }
+  },
+
+  updateCurrencyConfig: async (config) => {
+    try {
+      const res = await fetch('/api/settings/currency', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config),
+      });
+      if (!res.ok) return;
+      set({ currencyConfig: config });
+      get().addToast('success', 'Currency settings saved');
+    } catch (err) {
+      console.error('updateCurrencyConfig error:', err);
+    }
+  },
+
+  // ---------- Loyalty Cards ----------
+  loyaltyCards: [],
+  loyaltyCardsLoading: false,
+
+  fetchLoyaltyCards: async () => {
+    set({ loyaltyCardsLoading: true });
+    try {
+      const res = await fetch('/api/loyalty-cards');
+      if (!res.ok) throw new Error('Failed to fetch loyalty cards');
+      const data = await res.json();
+      set({ loyaltyCards: data });
+    } catch (err) {
+      console.error('fetchLoyaltyCards error:', err);
+    } finally {
+      set({ loyaltyCardsLoading: false });
+    }
+  },
+
+  createLoyaltyCard: async (data) => {
+    try {
+      const res = await fetch('/api/loyalty-cards/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      const result = await res.json();
+      if (!res.ok) throw new Error(result.error);
+      get().addToast('success', 'Loyalty card created');
+      return { card_number: result.card?.card_number };
+    } catch (err) {
+      console.error('createLoyaltyCard error:', err);
+      get().addToast('error', 'Failed to create loyalty card');
+    }
+  },
+
+  updateLoyaltyCard: async (id, data) => {
+    try {
+      const res = await fetch(`/api/loyalty-cards/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({ error: 'Failed to update loyalty card' }));
+        throw new Error(errData.error);
+      }
+      get().addToast('success', 'Loyalty card updated');
+    } catch (err) {
+      console.error('updateLoyaltyCard error:', err);
+      get().addToast('error', err instanceof Error ? err.message : 'Failed to update loyalty card');
+    }
+  },
+
+  lookupLoyaltyCard: async (code) => {
+    try {
+      const res = await fetch(`/api/loyalty-cards/lookup/${encodeURIComponent(code)}`);
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (err) {
+      console.error('lookupLoyaltyCard error:', err);
+      return null;
+    }
+  },
+
+  // ---------- Cashback Percent ----------
+  cashbackPercent: null,
+
+  fetchCashbackPercent: async () => {
+    try {
+      const res = await fetch('/api/settings/loyalty-cashback-percent');
+      if (res.ok) {
+        const data = await res.json();
+        set({ cashbackPercent: data.percent });
+      }
+    } catch (err) {
+      console.error('fetchCashbackPercent error:', err);
+    }
+  },
+
+  updateCashbackPercent: async (percent) => {
+    try {
+      await fetch('/api/settings/loyalty-cashback-percent', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ percent }),
+      });
+      set({ cashbackPercent: percent });
+      get().addToast('success', 'Cashback percentage updated');
+    } catch (err) {
+      console.error('updateCashbackPercent error:', err);
+    }
+  },
+
+  // ---------- Loyalty Notifications ----------
+  loyaltyNotifications: [],
+  loyaltyNotificationsLoading: false,
+  unseenNotifications: [],
+
+  fetchLoyaltyNotifications: async () => {
+    set({ loyaltyNotificationsLoading: true });
+    try {
+      const res = await fetch('/api/loyalty-notifications');
+      if (res.ok) {
+        const data = await res.json();
+        set({ loyaltyNotifications: data });
+      }
+    } catch (err) {
+      console.error('fetchLoyaltyNotifications error:', err);
+    } finally {
+      set({ loyaltyNotificationsLoading: false });
+    }
+  },
+
+  createNotification: async (data) => {
+    try {
+      const res = await fetch('/api/loyalty-notifications/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(data),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        return { error: err.error || 'Failed to create notification' };
+      }
+      await get().fetchLoyaltyNotifications();
+      return { error: null };
+    } catch {
+      return { error: 'Network error' };
+    }
+  },
+
+  sendNotification: async (id) => {
+    try {
+      const res = await fetch(`/api/loyalty-notifications/${id}/send`, { method: 'POST' });
+      if (!res.ok) {
+        const err = await res.json();
+        return { error: err.error || 'Failed to send notification' };
+      }
+      await get().fetchLoyaltyNotifications();
+      return { error: null };
+    } catch {
+      return { error: 'Network error' };
+    }
+  },
+
+  fetchUnseenNotifications: async (storeId) => {
+    try {
+      const res = await fetch(`/api/loyalty-notifications/unseen?store_id=${encodeURIComponent(storeId)}`);
+      if (res.ok) {
+        const data = await res.json();
+        set({ unseenNotifications: data });
+      }
+    } catch (err) {
+      console.error('fetchUnseenNotifications error:', err);
+    }
+  },
+
+  // ---------- Basket / Cart ----------
+  basketTabs: [],
+  activeTabId: null,
+
+  openNewBasket: (staffUserId, staffName) => set((state) => {
+    const tabId = `tab_${Date.now()}`;
+    const newTab = {
+      tabId,
+      staffUserId,
+      staffName,
+      items: [],
+      discount: 0,
+      loyaltyCardId: null as string | null,
+      loyaltyCustomerName: null as string | null,
+      loyaltyCashback: 0,
+    };
+    return {
+      basketTabs: [...state.basketTabs, newTab],
+      activeTabId: tabId,
+    };
+  }),
+
+  switchBasket: (tabId) => set({ activeTabId: tabId }),
+
+  closeBasket: (tabId) => set((state) => {
+    const filtered = state.basketTabs.filter((t) => t.tabId !== tabId);
+    return {
+      basketTabs: filtered,
+      activeTabId: filtered.length > 0 ? filtered[filtered.length - 1].tabId : null,
+    };
+  }),
+
+  addToBasket: (item) => set((state) => {
+    const tab = state.basketTabs.find((t) => t.tabId === state.activeTabId);
+    if (!tab) return state;
+    const existing = tab.items.find((i: any) => i.plu_id === item.plu_id);
+    if (existing) {
+      existing.quantity += 1;
+    } else {
+      tab.items.push({ ...item, quantity: 1 });
+    }
+    return { basketTabs: [...state.basketTabs] };
+  }),
+
+  updateBasketItemQty: (pluId, qty) => set((state) => {
+    const tab = state.basketTabs.find((t) => t.tabId === state.activeTabId);
+    if (!tab) return state;
+    const item = tab.items.find((i: any) => i.plu_id === pluId);
+    if (item) item.quantity = Math.max(0, qty);
+    tab.items = tab.items.filter((i: any) => i.quantity > 0);
+    return { basketTabs: [...state.basketTabs] };
+  }),
+
+  removeFromBasket: (pluId) => set((state) => {
+    const tab = state.basketTabs.find((t) => t.tabId === state.activeTabId);
+    if (!tab) return state;
+    tab.items = tab.items.filter((i: any) => i.plu_id !== pluId);
+    return { basketTabs: [...state.basketTabs] };
+  }),
+
+  setBasketDiscount: (tabId, amount) => set((state) => {
+    const tab = state.basketTabs.find((t) => t.tabId === tabId);
+    if (!tab) return state;
+    tab.discount = Math.max(0, amount);
+    return { basketTabs: [...state.basketTabs] };
+  }),
+
+  setBasketLoyalty: (tabId, cardId, customerName, cashback) => set((state) => {
+    const tab = state.basketTabs.find((t) => t.tabId === tabId);
+    if (!tab) return state;
+    tab.loyaltyCardId = cardId;
+    tab.loyaltyCustomerName = customerName;
+    tab.loyaltyCashback = cashback;
+    return { basketTabs: [...state.basketTabs] };
+  }),
+
+  // ---------- Sales ----------
+  saleTransactions: [],
+  saleTransactionsLoading: false,
+
+  fetchSaleTransactions: async (storeId, date) => {
+    set({ saleTransactionsLoading: true });
+    try {
+      let url = `/api/sales?store_id=${storeId}`;
+      if (date) url += `&date=${date}`;
+      const res = await fetch(url);
+      if (res.ok) {
+        const data = await res.json();
+        set({ saleTransactions: data });
+      }
+    } finally {
+      set({ saleTransactionsLoading: false });
+    }
+  },
+
+  createSale: async (payload) => {
+    try {
+      const res = await fetch('/api/sales/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (!res.ok) return { error: data.error || 'Failed to create sale' };
+      await get().fetchSaleTransactions(payload.store_id);
+      return { error: null, transaction: data.transaction };
+    } catch {
+      return { error: 'Network error' };
+    }
+  },
+
+  voidSale: async (transactionId) => {
+    try {
+      const res = await fetch('/api/sales/void', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transaction_id: transactionId }),
+      });
+      const data = await res.json();
+      if (!res.ok) return { error: data.error || 'Failed to void' };
+      return { error: null };
+    } catch {
+      return { error: 'Network error' };
     }
   },
 }));
+
+

@@ -71,7 +71,7 @@
 }
 
 .sidebar.collapsed .brand-icon {
-  margin: 0 auto;
+  margin-left: 2px;
 }
 
 .brand-text {
@@ -94,9 +94,8 @@
 .brand-user {
   font-size: 0.92rem;
   font-weight: 600;
-  color: var(--text-highlight);
+  color: var(--primary);
   margin-top: 2px;
-  text-shadow: 0 0 20px rgba(246, 166, 35, 0.3);
 }
 
 /* ---------- Navigation ---------- */
@@ -148,7 +147,7 @@
 }
 
 .nav-item.active {
-  background: rgba(10, 116, 218, 0.2);
+  background: var(--primary-light);
 }
 
 .nav-item.active::before {
@@ -172,10 +171,10 @@
   filter: brightness(1.3);
 }
 
-/* Collapsed: center icons */
+/* Collapsed: left-align icon */
 .sidebar.collapsed .nav-item {
-  justify-content: center;
-  padding: 12px 8px;
+  justify-content: flex-start;
+  padding: 12px 14px;
 }
 
 .sidebar.collapsed .sidebar-header {
@@ -184,6 +183,85 @@
 
 .sidebar.collapsed .brand-icon {
   font-size: 1.4rem;
+}
+
+/* ---------- Section Header (clickable) ---------- */
+.sidebar-section-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 12px 14px;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-family: inherit;
+  transition: all var(--transition-fast);
+  border-radius: var(--radius-md);
+  margin-top: 4px;
+}
+
+.sidebar-section-header:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+/* Collapsed state — highlighted to invite click */
+.sidebar-section-header.collapsed {
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  justify-content: flex-start;
+  padding: 12px 14px;
+  width: 100%;
+}
+
+.sidebar-section-header.collapsed.expanded {
+  background: var(--primary-light);
+  border-color: var(--primary);
+}
+
+.section-header-icon {
+  font-size: 1.15rem;
+  flex-shrink: 0;
+  width: 24px;
+  text-align: center;
+  line-height: 1;
+}
+
+.sidebar-section-header.collapsed:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+/* Expanded state — discrete */
+.sidebar-section-header:not(.collapsed) {
+  background: transparent;
+  border: 1px solid transparent;
+}
+
+.section-arrow {
+  font-size: 0.55rem;
+  color: rgba(255, 255, 255, 0.35);
+  flex-shrink: 0;
+  width: 12px;
+  text-align: center;
+}
+
+.sidebar-section-header:hover .section-arrow {
+  color: rgba(255, 255, 255, 0.55);
+}
+
+/* Section label — peach per brand */
+.sidebar-section-label {
+  flex: 1;
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--warning);
+  white-space: nowrap;
+  animation: fadeIn var(--transition-fast) ease-out;
+}
+
+.sidebar-section-header.collapsed .sidebar-section-label {
+  font-weight: 600;
 }
 
 /* ---------- Footer ---------- */
@@ -198,18 +276,6 @@
 
 .logout-btn:hover .nav-label {
   color: var(--error) !important;
-}
-
-/* ---------- Setup Section Label ---------- */
-.sidebar-section-label {
-  font-size: 0.65rem;
-  font-weight: 700;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: rgba(255, 255, 255, 0.3);
-  padding: 12px 14px 4px;
-  white-space: nowrap;
-  animation: fadeIn var(--transition-fast) ease-out;
 }
 
 .sidebar-section-divider {
@@ -229,7 +295,7 @@
   left: calc(100% + 12px);
   top: 50%;
   transform: translateY(-50%);
-  background: #1a2332;
+  background: var(--bg-sidebar);
   color: #fff;
   padding: 6px 12px;
   border-radius: var(--radius-sm);

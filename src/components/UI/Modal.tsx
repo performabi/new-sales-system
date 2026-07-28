@@ -1,5 +1,5 @@
 // src/components/UI/Modal.tsx
-import { useEffect, useRef } from 'react';
+import { useEffect } from 'react';
 
 interface ModalProps {
   isOpen: boolean;
@@ -9,8 +9,6 @@ interface ModalProps {
 }
 
 export default function Modal({ isOpen, onClose, title, children }: ModalProps) {
-  const modalRef = useRef<HTMLDivElement>(null);
-
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose();
@@ -38,7 +36,7 @@ export default function Modal({ isOpen, onClose, title, children }: ModalProps) 
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="modal-content" ref={modalRef} role="dialog" aria-modal="true">
+      <div className="modal-content" role="dialog" aria-modal="true">
         <div className="modal-header">
           <h2>{title}</h2>
           <button className="modal-close" onClick={onClose} aria-label="Close modal">

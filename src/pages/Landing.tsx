@@ -1,0 +1,164 @@
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { useAuthStore } from '../store/authStore';
+
+export default function Landing() {
+  const { profile, loading, signIn, signOut } = useAuthStore();
+  const navigate = useNavigate();
+
+  const [showHOLogin, setShowHOLogin] = useState(false);
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState<string | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  useEffect(() => {
+    if (!loading && profile) {
+      if (profile.role === 'user') {
+        navigate('/pos/login', { replace: true });
+      } else {
+        navigate('/headoffice/dashboard', { replace: true });
+      }
+    }
+  }, [loading, profile, navigate]);
+
+  const handleHOLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError(null);
+    setIsSubmitting(true);
+    const { error: err } = await signIn(email, password);
+    if (err) {
+      setError(err);
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    await signOut();
+  };
+
+  if (loading) {
+    return (
+      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div className="spinner" style={{ borderColor: 'var(--border-medium)', borderTopColor: 'var(--primary)' }}></div>
+      </div>
+    );
+  }
+
+  if (profile && (profile.role === 'super_user' || profile.role === 'admin')) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px', gap: '24px' }}>
+        <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+          <div style={{ fontSize: '3rem', marginBottom: '8px' }}>🏢</div>
+          <h1>Welcome, {profile.full_name}</h1>
+          <p style={{ color: 'var(--text-muted)', marginTop: '8px' }}>
+            {profile.role === 'super_user' ? 'Super User' : 'Administrator'}
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', justifyContent: 'center' }}>
+          <div
+            className="card"
+            style={{ width: '280px', textAlign: 'center', cursor: 'pointer', padding: '32px' }}
+            onClick={() => navigate('/headoffice/dashboard')}
+          >
+            <div style={{ fontSize: '3rem', marginBottom: '16px' }}>🏢</div>
+            <h3>Head Office</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: '8px' }}>
+              Manage stores, PLUs, users, suppliers, POs and reports
+            </p>
+            <button className="btn btn-primary" style={{ marginTop: '16px', width: '100%' }}>
+              Open Head Office
+            </button>
+          </div>
+          <div
+            className="card"
+            style={{ width: '280px', textAlign: 'center', cursor: 'pointer', padding: '32px' }}
+            onClick={() => navigate('/pos/dashboard')}
+          >
+            <div style={{ fontSize: '3rem', marginBottom: '16px' }}>🏪</div>
+            <h3>Store Terminal</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: '8px' }}>
+              POS, deliveries, clock in/out and store operations
+            </p>
+            <button className="btn btn-secondary" style={{ marginTop: '16px', width: '100%' }}>
+              Open Store Terminal
+            </button>
+          </div>
+        </div>
+        <button className="btn btn-ghost" onClick={handleLogout} style={{ marginTop: '16px' }}>
+          Logout
+        </button>
+      </div>
+    );
+  }
+
+  if (showHOLogin) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
+        <div className="card" style={{ maxWidth: '400px', width: '100%' }}>
+          <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+            <div style={{ fontSize: '3rem', marginBottom: '16px' }}>🏢</div>
+            <h1>HEAD OFFICE</h1>
+            <p style={{ marginTop: '8px' }}>Log in to access the portal</p>
+          </div>
+          <form onSubmit={handleHOLogin}>
+            <div className="form-group">
+              <label className="form-label" htmlFor="email">Email</label>
+              <input id="email" type="email" className="form-input" value={email} onChange={(e) => setEmail(e.target.value)} required disabled={isSubmitting} />
+            </div>
+            <div className="form-group" style={{ marginBottom: '24px' }}>
+              <label className="form-label" htmlFor="password">Password</label>
+              <input id="password" type="password" className="form-input" value={password} onChange={(e) => setPassword(e.target.value)} required disabled={isSubmitting} />
+            </div>
+            {error && <div className="form-error" style={{ marginBottom: '16px', textAlign: 'center' }}>{error}</div>}
+            <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '12px' }} disabled={isSubmitting}>
+              {isSubmitting ? 'Authenticating...' : 'Sign In'}
+            </button>
+          </form>
+          <button className="btn btn-ghost" style={{ width: '100%', marginTop: '12px' }} onClick={() => { setShowHOLogin(false); setError(null); }}>
+            Back
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px', gap: '24px' }}>
+      <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+        <h1>New Sales System</h1>
+        <p style={{ color: 'var(--text-muted)', marginTop: '8px' }}>Select your access point</p>
+      </div>
+      <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', justifyContent: 'center' }}>
+        <div
+          className="card"
+          style={{ width: '280px', textAlign: 'center', cursor: 'pointer', padding: '32px' }}
+          onClick={() => setShowHOLogin(true)}
+        >
+          <div style={{ fontSize: '3rem', marginBottom: '16px' }}>🏢</div>
+          <h3>Head Office</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: '8px' }}>
+            Admin & management portal
+          </p>
+          <button className="btn btn-primary" style={{ marginTop: '16px', width: '100%' }}>
+            Sign In
+          </button>
+        </div>
+        <div
+          className="card"
+          style={{ width: '280px', textAlign: 'center', cursor: 'pointer', padding: '32px' }}
+          onClick={() => navigate('/pos/login')}
+        >
+          <div style={{ fontSize: '3rem', marginBottom: '16px' }}>🏪</div>
+          <h3>Store Terminal</h3>
+          <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: '8px' }}>
+            POS, deliveries & store operations
+          </p>
+          <button className="btn btn-secondary" style={{ marginTop: '16px', width: '100%' }}>
+            Open POS
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}

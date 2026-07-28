@@ -39,12 +39,13 @@ export default function Users() {
 
     if (isEditMode && editingUserId) {
       const res = await updateUser(editingUserId, {
-        email, // Send email to update auth.users and users table
+        email,
         username,
         full_name: fullName,
         role,
         is_active: isActive,
         assigned_store_id: role === 'admin' ? null : (assignedStoreId || null),
+        ...(pin ? { pin } : {}),
       });
       submitError = res.error;
     } else {

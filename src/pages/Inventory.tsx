@@ -22,7 +22,7 @@ export default function Inventory() {
     ...item,
     price: `£${Number(item.price).toFixed(2)}`,
     stock_quantity: (
-      <span className={item.stock_quantity <= 5 ? 'form-error' : ''} style={{ fontWeight: '600' }}>
+      <span className={item.stock_quantity <= 5 ? 'low-stock' : ''} style={{ fontWeight: '600' }}>
         {item.stock_quantity}
       </span>
     ),
