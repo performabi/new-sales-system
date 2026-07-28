@@ -111,7 +111,7 @@ export default function PurchaseOrderCreate() {
     });
     setManualSubmitting(false);
     if (!result.error) {
-      navigate('/headoffice/inventory/purchase-orders');
+      navigate('/app/inventory/purchase-orders');
     }
   };
 
@@ -249,7 +249,7 @@ export default function PurchaseOrderCreate() {
           </span>
         </div>
         <div style={{ display: 'flex', gap: '10px' }}>
-          <button className="btn btn-ghost" onClick={() => navigate('/headoffice/inventory/purchase-orders')}>Cancel</button>
+          <button className="btn btn-ghost" onClick={() => navigate('/app/inventory/purchase-orders')}>Cancel</button>
           <button className="btn btn-primary" onClick={handleSubmit}
             disabled={manualSubmitting || !manualStoreId || !manualSupplierId || manualItems.every((i) => !i.plu_id || i.quantity_ordered <= 0)}>
             {manualSubmitting ? 'Creating…' : 'Create PO Draft'}

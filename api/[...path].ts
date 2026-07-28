@@ -2,13 +2,19 @@ import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
-function getSupabaseAdmin() {
+function getSupabaseAdmin(schema?: string) {
   const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
   const serviceRole = process.env.SERVICE_ROLE || '';
   if (!supabaseUrl || !serviceRole) throw new Error('Missing Supabase admin credentials');
-  return createClient(supabaseUrl, serviceRole, {
-    auth: { autoRefreshToken: false, persistSession: false },
-  });
+  const opts: any = { auth: { autoRefreshToken: false, persistSession: false } };
+  if (schema) opts.db = { schema };
+  return createClient(supabaseUrl, serviceRole, opts);
+}
+
+function getTenantContext(req: any, reqBody: any): string {
+  if (req.headers['x-tenant-schema']) return req.headers['x-tenant-schema'];
+  if (reqBody?.tenant_schema) return reqBody.tenant_schema;
+  return 'public';
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -774,6 +780,85 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .or(`store_id.eq.${storeId},store_id.is.null`)
         .not('sent_at', 'is', null)
         .order('created_at', { ascending: false });
+      if (error) return res.status(400).json({ error: error.message });
+      return res.json(data);
+    }
+
+    // ---- Admin: list tenants ----
+    if (path[0] === 'admin' && path[1] === 'tenants' && method === 'GET') {
+      const { data: tenants } = await supabaseAdmin.from('tenants').select('*').order('created_at', { ascending: false });
+      const { data: subs } = await supabaseAdmin.from('tenant_subscriptions').select('*, plans(name)');
+      const subMap = new Map((subs || []).map((s: any) => [s.tenant_id, s]));
+      const enriched = (tenants || []).map((t: any) => ({
+        ...t,
+        plan_name: subMap.get(t.tenant_id)?.plans?.name || null,
+        subscription_status: subMap.get(t.tenant_id)?.status || null,
+      }));
+      return res.json(enriched);
+    }
+
+    // ---- Admin: provision tenant ----
+    if (path[0] === 'admin' && path[1] === 'provision-tenant' && method === 'POST') {
+      const { name, slug, plan_id, admin_email, admin_name } = body;
+      if (!name || !slug || !plan_id || !admin_email || !admin_name) {
+        return res.status(400).json({ error: 'All fields required' });
+      }
+      const { data: tenantId, error: provisionError } = await supabaseAdmin.rpc('provision_tenant', {
+        p_tenant_name: name, p_slug: slug, p_plan_id: plan_id,
+      });
+      if (provisionError) return res.status(400).json({ error: provisionError.message });
+      const schemaName = `tenant_${tenantId?.toString().replace(/-/g, '')}`;
+      const { data: inviteData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(admin_email, {
+        data: { tenant_schema: schemaName, is_tenant_admin: true },
+      });
+      if (inviteError) {
+        return res.json({ tenant_id: tenantId, warning: `Tenant created but invite failed: ${inviteError.message}` });
+      }
+      if (inviteData?.user) {
+        const tenantAdmin = createClient(process.env.VITE_SUPABASE_URL || '', process.env.SERVICE_ROLE || '', {
+          auth: { autoRefreshToken: false, persistSession: false },
+          db: { schema: schemaName },
+        });
+        await tenantAdmin.from('users').insert({
+          user_id: inviteData.user.id,
+          username: admin_email.split('@')[0],
+          email: admin_email,
+          full_name: admin_name,
+          role: 'super_user',
+          is_active: true,
+        });
+      }
+      return res.json({ tenant_id: tenantId, message: 'Tenant provisioned successfully' });
+    }
+
+    // ---- Admin: list super users ----
+    if (path[0] === 'admin' && path[1] === 'super-users' && method === 'GET') {
+      const { data, error } = await supabaseAdmin.from('super_users').select('*').order('created_at', { ascending: false });
+      if (error) return res.status(400).json({ error: error.message });
+      return res.json(data);
+    }
+
+    // ---- Admin: invite super user ----
+    if (path[0] === 'admin' && path[1] === 'super-users' && path[2] === 'invite' && method === 'POST') {
+      const { email, full_name, role } = body;
+      if (!email || !full_name || !role) {
+        return res.status(400).json({ error: 'email, full_name, and role required' });
+      }
+      const { data: inviteData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+        data: { is_super_admin: role === 'super_admin', is_support: role === 'support', full_name },
+      });
+      if (inviteError) return res.status(400).json({ error: inviteError.message });
+      if (!inviteData?.user) return res.status(400).json({ error: 'Failed to create user' });
+      const { error: insertError } = await supabaseAdmin.from('super_users').insert({
+        super_user_id: inviteData.user.id, email, full_name, role, is_active: true,
+      });
+      if (insertError) return res.status(400).json({ error: insertError.message });
+      return res.json({ success: true, super_user_id: inviteData.user.id });
+    }
+
+    // ---- Admin: list plans ----
+    if (path[0] === 'admin' && path[1] === 'plans' && method === 'GET') {
+      const { data, error } = await supabaseAdmin.from('plans').select('*').order('price');
       if (error) return res.status(400).json({ error: error.message });
       return res.json(data);
     }

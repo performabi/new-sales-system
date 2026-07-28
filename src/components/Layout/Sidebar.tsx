@@ -24,9 +24,9 @@ const SECTIONS: Section[] = [
     name: 'Operations',
     icon: '🏭',
     items: [
-      { path: '/headoffice/plu',                     icon: '🏷️', label: 'PLU' },
-      { path: '/headoffice/inventory/purchase-orders', icon: '📝', label: 'Purchase Orders' },
-      { path: '/headoffice/inventory',               icon: '📦',  label: 'Inventory' },
+      { path: '/app/plu',                     icon: '🏷️', label: 'PLU' },
+      { path: '/app/inventory/purchase-orders', icon: '📝', label: 'Purchase Orders' },
+      { path: '/app/inventory',               icon: '📦',  label: 'Inventory' },
     ],
   },
   {
@@ -40,29 +40,29 @@ const SECTIONS: Section[] = [
     name: 'Loyalty',
     icon: '💳',
     items: [
-      { path: '/headoffice/loyalty-cards', icon: '💳', label: 'Loyalty Cards' },
-      { path: '/headoffice/loyalty-notifications', icon: '🔔', label: 'Notifications' },
+      { path: '/app/loyalty-cards', icon: '💳', label: 'Loyalty Cards' },
+      { path: '/app/loyalty-notifications', icon: '🔔', label: 'Notifications' },
     ],
   },
   {
     name: 'Setup',
     icon: '⚙️',
     items: [
-      { path: '/headoffice/stores',                  icon: '🏪',  label: 'Stores' },
-      { path: '/headoffice/users',                   icon: '👥',  label: 'Users' },
-      { path: '/headoffice/setup/suppliers',   icon: '🤝', label: 'Suppliers' },
-      { path: '/headoffice/setup/categories',  icon: '🗂️', label: 'Categories' },
-      { path: '/headoffice/setup/item-sizing', icon: '📐', label: 'Item Sizing' },
-      { path: '/headoffice/setup/store-checklists', icon: '✅', label: 'Checklists' },
-      { path: '/headoffice/setup/currency-config', icon: '💷', label: 'Currency' },
-      { path: '/headoffice/setup/cashback-config', icon: '💰', label: 'Cashback' },
+      { path: '/app/stores',                  icon: '🏪',  label: 'Stores' },
+      { path: '/app/users',                   icon: '👥',  label: 'Users' },
+      { path: '/app/setup/suppliers',   icon: '🤝', label: 'Suppliers' },
+      { path: '/app/setup/categories',  icon: '🗂️', label: 'Categories' },
+      { path: '/app/setup/item-sizing', icon: '📐', label: 'Item Sizing' },
+      { path: '/app/setup/store-checklists', icon: '✅', label: 'Checklists' },
+      { path: '/app/setup/currency-config', icon: '💷', label: 'Currency' },
+      { path: '/app/setup/cashback-config', icon: '💰', label: 'Cashback' },
     ],
   },
   {
     name: 'Audit',
     icon: '📋',
     items: [
-      { path: '/headoffice/setup/logbook', icon: '📋', label: 'Logbook' },
+      { path: '/app/setup/logbook', icon: '📋', label: 'Logbook' },
     ],
   },
 ];
@@ -107,7 +107,11 @@ function SectionHeader({
 export default function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { profile, signOut } = useAuthStore();
+  const { profile, superUser, userType, signOut } = useAuthStore();
+  const displayName = profile?.full_name ?? superUser?.full_name ?? 'Loading…';
+  const displayRole = userType === 'super_admin' ? 'System Admin'
+    : userType === 'support' ? 'Support'
+    : profile?.role?.replace('_', ' ') ?? '';
   const { sidebarCollapsed, toggleSidebar } = useAppStore();
 
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() => ({}));
@@ -150,7 +154,7 @@ export default function Sidebar() {
           {!sidebarCollapsed && (
             <div className="brand-text" style={{ display: 'flex', flexDirection: 'column' }}>
               <span className="brand-title">HEAD OFFICE</span>
-              <span className="brand-user" style={{ fontWeight: 600 }}>{profile?.full_name ?? 'Loading…'}</span>
+              <span className="brand-user" style={{ fontWeight: 600 }}>{displayName}</span>
               <span className="brand-role" style={{
                 fontSize: '0.72rem',
                 color: 'var(--text-muted)',
@@ -158,7 +162,7 @@ export default function Sidebar() {
                 letterSpacing: '0.04em',
                 marginTop: '2px'
               }}>
-                {profile?.role?.replace('_', ' ') ?? ''}
+                {displayRole}
               </span>
               <ThemeToggle />
             </div>
@@ -169,8 +173,8 @@ export default function Sidebar() {
       <nav className="sidebar-nav">
         {/* Dashboard — always visible, no section */}
         <button
-          className={`nav-item ${isActive('/headoffice/dashboard') ? 'active' : ''}`}
-          onClick={() => navigate('/headoffice/dashboard')}
+          className={`nav-item ${isActive('/app/dashboard') ? 'active' : ''}`}
+          onClick={() => navigate('/app/dashboard')}
           title={sidebarCollapsed ? 'Dashboard' : undefined}
         >
           <span className="nav-icon">📊</span>
@@ -204,8 +208,8 @@ export default function Sidebar() {
 
       <div className="sidebar-footer">
         <button
-          className={`nav-item ${isActive('/headoffice/help/faq') ? 'active' : ''}`}
-          onClick={() => navigate('/headoffice/help/faq')}
+          className={`nav-item ${isActive('/app/help/faq') ? 'active' : ''}`}
+          onClick={() => navigate('/app/help/faq')}
           title={sidebarCollapsed ? 'FAQ & Support' : undefined}
         >
           <span className="nav-icon">❓</span>

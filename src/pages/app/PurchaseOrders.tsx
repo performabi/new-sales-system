@@ -301,7 +301,7 @@ export default function PurchaseOrders() {
             <h3 style={{ marginBottom: '4px' }}>✍️ Manual Purchase Order</h3>
             <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>Create a PO from scratch by selecting items individually.</p>
           </div>
-          <button className="btn btn-primary" onClick={() => navigate('/headoffice/inventory/purchase-orders/create')}>+ New Manual PO</button>
+          <button className="btn btn-primary" onClick={() => navigate('/app/inventory/purchase-orders/create')}>+ New Manual PO</button>
         </div>
       </div>
 

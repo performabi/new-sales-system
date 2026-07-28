@@ -254,3 +254,54 @@ export interface LoyaltyNotification {
   created_by?: string;
   sent_at?: string | null;
 }
+
+// =============================================
+// Multi-Tenant System Types
+// =============================================
+
+export interface SuperUser {
+  super_user_id: string;
+  email: string;
+  full_name: string;
+  role: 'super_admin' | 'support';
+  is_active: boolean;
+  created_at: string;
+  created_by?: string | null;
+}
+
+export interface Tenant {
+  tenant_id: string;
+  name: string;
+  slug: string;
+  schema_name: string;
+  domain?: string | null;
+  is_active: boolean;
+  plan_id?: string | null;
+  created_at: string;
+  created_by?: string | null;
+  plan_name?: string;
+  user_count?: number;
+  store_count?: number;
+}
+
+export interface TenantPlan {
+  plan_id: string;
+  name: string;
+  description?: string | null;
+  price: number;
+  max_stores: number;
+  max_users: number;
+  features?: Record<string, any>;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface TenantSubscription {
+  subscription_id: string;
+  tenant_id: string;
+  plan_id: string;
+  status: 'active' | 'trial' | 'cancelled' | 'expired';
+  starts_at: string;
+  ends_at?: string | null;
+  created_at: string;
+}

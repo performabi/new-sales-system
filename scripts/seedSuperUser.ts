@@ -1,17 +1,19 @@
 /**
- * Seed script: creates the initial super_user account.
+ * Seed script: creates the initial super_admin account.
  *
- * Usage (after filling in .env):
- *   npx tsx scripts/seedSuperUser.ts
+ * Usage (after .env is configured with your new Supabase project):
+ *   npx tsx --env-file=.env scripts/seedSuperUser.ts
  *
  * This script:
- *  1. Creates a Supabase Auth user (email: performa@headoffice.local, password: auto-generated)
- *  2. Inserts the matching row in the `users` table with role='super_user', PIN=5555
+ *  1. Invites info@performabi.com via Supabase Auth (sends invite email)
+ *  2. Inserts the matching row in public.super_users with role='super_admin'
+ *
+ * Prerequisites:
+ *  - SMTP configured in Supabase Auth settings (so invite emails send)
+ *  - Migrations 000, 001, 002 already run in SQL Editor
  */
 import { createClient } from '@supabase/supabase-js';
-import { createHash } from 'crypto';
 
-// ---------- Config ----------
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL || '';
 const SERVICE_ROLE = process.env.SERVICE_ROLE || '';
 
@@ -25,30 +27,22 @@ const supabase = createClient(SUPABASE_URL, SERVICE_ROLE, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
-// ---------- Helpers ----------
-function hashPin(pin: string): string {
-  return createHash('sha256').update(pin).digest('hex');
-}
-
-// ---------- Main ----------
 async function seed() {
   const email = 'info@performabi.com';
-  const password = 'p3rf0rm4';   // default password — change after first login
-  const username = 'performa';
-  const fullName = 'Performa (Super User)';
-  const pin = '5555';
+  const fullName = 'Performa (Super Admin)';
 
-  console.log('🔧  Creating Supabase Auth user …');
+  console.log('🔧  Inviting super admin via Supabase Auth …');
 
-  const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
+  const { data, error } = await supabase.auth.admin.inviteUserByEmail(email, {
+    data: {
+      is_super_admin: true,
+      full_name: fullName,
+    },
   });
 
-  if (authError) {
-    // If user already exists, try to look them up
-    if (authError.message?.includes('already been registered')) {
+  if (error) {
+    // If already invited, look up existing user
+    if (error.message?.includes('already been invited') || error.message?.includes('already been registered')) {
       console.log('ℹ️   Auth user already exists — looking up ID …');
       const { data: list } = await supabase.auth.admin.listUsers();
       const existing = list?.users?.find((u) => u.email === email);
@@ -56,52 +50,51 @@ async function seed() {
         console.error('❌  Could not find existing auth user.');
         process.exit(1);
       }
-      await upsertProfile(existing.id, username, fullName, pin);
+      await upsertSuperUser(existing.id, email, fullName);
       return;
     }
-    console.error('❌  Auth error:', authError.message);
+    console.error('❌  Auth invite error:', error.message);
     process.exit(1);
   }
 
-  const userId = authData.user.id;
-  console.log(`✅  Auth user created: ${userId}`);
+  if (!data?.user) {
+    console.error('❌  No user returned from invite.');
+    process.exit(1);
+  }
 
-  await upsertProfile(userId, username, fullName, pin);
+  console.log(`✅  Auth invite sent: ${data.user.id}`);
+  await upsertSuperUser(data.user.id, email, fullName);
 }
 
-async function upsertProfile(
-  userId: string,
-  username: string,
-  fullName: string,
-  pin: string,
-) {
-  console.log('🔧  Upserting users profile …');
+async function upsertSuperUser(userId: string, email: string, fullName: string) {
+  console.log('🔧  Adding to public.super_users …');
 
-  const { error } = await supabase.from('users').upsert(
+  const { error } = await supabase.from('super_users').upsert(
     {
-      user_id: userId,
-      username,
-      pin_hash: hashPin(pin),
+      super_user_id: userId,
+      email,
       full_name: fullName,
-      role: 'super_user',
+      role: 'super_admin',
       is_active: true,
-      assigned_store_id: null,
     },
-    { onConflict: 'user_id' },
+    { onConflict: 'super_user_id' },
   );
 
   if (error) {
-    console.error('❌  Profile upsert error:', error.message);
+    console.error('❌  super_users insert error:', error.message);
     process.exit(1);
   }
 
-  console.log('✅  Super user profile ready!');
+  console.log('✅  Super admin created!');
   console.log('');
   console.log('   📧 Email:    info@performabi.com');
-  console.log('   🔑 Password: p3rf0rm4');
-  console.log('   🔢 PIN:      5555');
   console.log('');
-  console.log('   ⚠️  Change the password after your first login.');
+  console.log('   ℹ️  An invite email has been sent to this address.');
+  console.log('   ℹ️  Click the link in the email to set your password.');
+  console.log('');
+  console.log('   ⚠️  After first login, you will be redirected to /admin/dashboard');
+  console.log('   ⚠️  From there you can provision your own company tenant and');
+  console.log('       then add more super_admin / support team members.');
 }
 
 seed();

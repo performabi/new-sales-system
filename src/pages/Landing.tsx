@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 
 export default function Landing() {
-  const { profile, loading, signIn, signOut } = useAuthStore();
+  const { profile, superUser, userType, loading, signIn, signOut } = useAuthStore();
   const navigate = useNavigate();
 
   const [showHOLogin, setShowHOLogin] = useState(false);
@@ -13,14 +13,18 @@ export default function Landing() {
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   useEffect(() => {
-    if (!loading && profile) {
+    if (loading) return;
+
+    if (userType === 'super_admin' || userType === 'support') {
+      navigate('/admin/dashboard', { replace: true });
+    } else if (profile) {
       if (profile.role === 'user') {
         navigate('/pos/login', { replace: true });
       } else {
-        navigate('/headoffice/dashboard', { replace: true });
+        navigate('/app/dashboard', { replace: true });
       }
     }
-  }, [loading, profile, navigate]);
+  }, [loading, userType, profile, navigate]);
 
   const handleHOLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -37,10 +41,45 @@ export default function Landing() {
     await signOut();
   };
 
+  const userDisplayName = superUser?.full_name || profile?.full_name;
+
   if (loading) {
     return (
       <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
         <div className="spinner" style={{ borderColor: 'var(--border-medium)', borderTopColor: 'var(--primary)' }}></div>
+      </div>
+    );
+  }
+
+  if (superUser && (userType === 'super_admin' || userType === 'support')) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px', gap: '24px' }}>
+        <div style={{ textAlign: 'center', marginBottom: '16px' }}>
+          <div style={{ fontSize: '3rem', marginBottom: '8px' }}>⚙️</div>
+          <h1>Welcome, {userDisplayName}</h1>
+          <p style={{ color: 'var(--text-muted)', marginTop: '8px' }}>
+            {userType === 'super_admin' ? 'System Administrator' : 'Support Agent'}
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', justifyContent: 'center' }}>
+          <div
+            className="card"
+            style={{ width: '280px', textAlign: 'center', cursor: 'pointer', padding: '32px' }}
+            onClick={() => navigate('/admin/dashboard')}
+          >
+            <div style={{ fontSize: '3rem', marginBottom: '16px' }}>⚙️</div>
+            <h3>System Admin</h3>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.875rem', marginTop: '8px' }}>
+              Manage tenants, plans, team members and system settings
+            </p>
+            <button className="btn btn-primary" style={{ marginTop: '16px', width: '100%' }}>
+              Open Admin
+            </button>
+          </div>
+        </div>
+        <button className="btn btn-ghost" onClick={handleLogout} style={{ marginTop: '16px' }}>
+          Logout
+        </button>
       </div>
     );
   }
@@ -50,16 +89,16 @@ export default function Landing() {
       <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '24px', gap: '24px' }}>
         <div style={{ textAlign: 'center', marginBottom: '16px' }}>
           <div style={{ fontSize: '3rem', marginBottom: '8px' }}>🏢</div>
-          <h1>Welcome, {profile.full_name}</h1>
+          <h1>Welcome, {userDisplayName}</h1>
           <p style={{ color: 'var(--text-muted)', marginTop: '8px' }}>
-            {profile.role === 'super_user' ? 'Super User' : 'Administrator'}
+            {profile.role === 'super_user' ? 'Company Super User' : 'Company Administrator'}
           </p>
         </div>
         <div style={{ display: 'flex', gap: '16px', flexWrap: 'wrap', justifyContent: 'center' }}>
           <div
             className="card"
             style={{ width: '280px', textAlign: 'center', cursor: 'pointer', padding: '32px' }}
-            onClick={() => navigate('/headoffice/dashboard')}
+            onClick={() => navigate('/app/dashboard')}
           >
             <div style={{ fontSize: '3rem', marginBottom: '16px' }}>🏢</div>
             <h3>Head Office</h3>

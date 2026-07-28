@@ -3,16 +3,18 @@ import express from 'express';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
-function getSupabaseAdmin(server: any) {
+function getSupabaseAdmin(server: any, schema?: string) {
   const env = loadEnv(server.config.mode, process.cwd(), '');
   const supabaseUrl = env.VITE_SUPABASE_URL || '';
   const serviceRole = env.SERVICE_ROLE || '';
   if (!supabaseUrl || !serviceRole) {
     throw new Error('Missing Supabase admin credentials on server.');
   }
-  return createClient(supabaseUrl, serviceRole, {
+  const opts: any = {
     auth: { autoRefreshToken: false, persistSession: false },
-  });
+  };
+  if (schema) opts.db = { schema };
+  return createClient(supabaseUrl, serviceRole, opts);
 }
 
 export function apiPlugin(): Plugin {
@@ -1582,6 +1584,127 @@ export function apiPlugin(): Plugin {
         }
       });
 
+
+      // ---- Admin: list tenants ----
+      app.get('/api/admin/tenants', async (req, res) => {
+        try {
+          const supabaseAdmin = getSupabaseAdmin(server, 'public');
+          const { data: tenants } = await supabaseAdmin.from('tenants').select('*').order('created_at', { ascending: false });
+          const { data: subs } = await supabaseAdmin.from('tenant_subscriptions').select('*, plans(name)');
+          const subMap = new Map((subs || []).map((s: any) => [s.tenant_id, s]));
+          const enriched = (tenants || []).map((t: any) => ({
+            ...t,
+            plan_name: subMap.get(t.tenant_id)?.plans?.name || null,
+            subscription_status: subMap.get(t.tenant_id)?.status || null,
+          }));
+          return res.json(enriched);
+        } catch (err) {
+          return res.status(500).json({ error: 'Failed to fetch tenants' });
+        }
+      });
+
+      // ---- Admin: provision tenant ----
+      app.post('/api/admin/provision-tenant', async (req, res) => {
+        try {
+          const supabaseAdmin = getSupabaseAdmin(server, 'public');
+          const { name, slug, plan_id, admin_email, admin_name } = req.body;
+          if (!name || !slug || !plan_id || !admin_email || !admin_name) {
+            return res.status(400).json({ error: 'All fields required' });
+          }
+
+          // Call the provision_tenant function
+          const { data, error } = await supabaseAdmin.rpc('provision_tenant', {
+            p_tenant_name: name,
+            p_slug: slug,
+            p_plan_id: plan_id,
+          });
+
+          if (error) return res.status(400).json({ error: error.message });
+          const tenantId = data;
+
+          // Invite the admin user
+          const { data: inviteData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(admin_email, {
+            data: { tenant_schema: `tenant_${tenantId?.toString().replace(/-/g, '')}`, is_tenant_admin: true },
+          });
+
+          if (inviteError) {
+            return res.json({ tenant_id: tenantId, warning: `Tenant created but invite failed: ${inviteError.message}` });
+          }
+
+          if (inviteData?.user) {
+            // Insert into tenant's users table
+            const schemaName = `tenant_${tenantId?.toString().replace(/-/g, '')}`;
+            const tenantAdmin = getSupabaseAdmin(server, schemaName);
+            await tenantAdmin.from('users').insert({
+              user_id: inviteData.user.id,
+              username: admin_email.split('@')[0],
+              email: admin_email,
+              full_name: admin_name,
+              role: 'super_user',
+              is_active: true,
+            });
+          }
+
+          return res.json({ tenant_id: tenantId, message: 'Tenant provisioned successfully' });
+        } catch (err: any) {
+          return res.status(500).json({ error: err.message || 'Provisioning failed' });
+        }
+      });
+
+      // ---- Admin: list super users ----
+      app.get('/api/admin/super-users', async (req, res) => {
+        try {
+          const supabaseAdmin = getSupabaseAdmin(server, 'public');
+          const { data, error } = await supabaseAdmin.from('super_users').select('*').order('created_at', { ascending: false });
+          if (error) return res.status(400).json({ error: error.message });
+          return res.json(data);
+        } catch (err) {
+          return res.status(500).json({ error: 'Failed to fetch super users' });
+        }
+      });
+
+      // ---- Admin: invite super user ----
+      app.post('/api/admin/super-users/invite', async (req, res) => {
+        try {
+          const supabaseAdmin = getSupabaseAdmin(server, 'public');
+          const { email, full_name, role } = req.body;
+          if (!email || !full_name || !role) {
+            return res.status(400).json({ error: 'email, full_name, and role required' });
+          }
+
+          const { data: inviteData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+            data: { is_super_admin: role === 'super_admin', is_support: role === 'support', full_name },
+          });
+
+          if (inviteError) return res.status(400).json({ error: inviteError.message });
+          if (!inviteData?.user) return res.status(400).json({ error: 'Failed to create user' });
+
+          const { error: insertError } = await supabaseAdmin.from('super_users').insert({
+            super_user_id: inviteData.user.id,
+            email,
+            full_name,
+            role,
+            is_active: true,
+          });
+          if (insertError) return res.status(400).json({ error: insertError.message });
+
+          return res.json({ success: true, super_user_id: inviteData.user.id });
+        } catch (err: any) {
+          return res.status(500).json({ error: err.message || 'Invite failed' });
+        }
+      });
+
+      // ---- Admin: list plans ----
+      app.get('/api/admin/plans', async (req, res) => {
+        try {
+          const supabaseAdmin = getSupabaseAdmin(server, 'public');
+          const { data, error } = await supabaseAdmin.from('plans').select('*').order('price');
+          if (error) return res.status(400).json({ error: error.message });
+          return res.json(data);
+        } catch (err) {
+          return res.status(500).json({ error: 'Failed to fetch plans' });
+        }
+      });
 
       // Mount Express app onto Vite's dev server
       server.middlewares.use(app);

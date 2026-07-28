@@ -1,16 +1,20 @@
-// src/store/authStore.ts
 import { create } from 'zustand';
 import type { Session, User } from '@supabase/supabase-js';
-import type { UserProfile } from '../types';
+import type { UserProfile, SuperUser } from '../types';
 import { getSupabaseClient } from '../lib/supabaseClient';
+
+export type UserType = 'super_admin' | 'support' | 'tenant_admin' | 'tenant_user' | null;
 
 interface AuthState {
   session: Session | null;
   user: User | null;
   profile: UserProfile | null;
+  superUser: SuperUser | null;
+  userType: UserType;
   loading: boolean;
   setSession: (session: Session | null) => void;
   setProfile: (profile: UserProfile | null) => void;
+  setSuperUser: (superUser: SuperUser | null) => void;
   setLoading: (loading: boolean) => void;
   initialize: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
@@ -22,48 +26,37 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   session: null,
   user: null,
   profile: null,
+  superUser: null,
+  userType: null,
   loading: true,
 
   setSession: (session) => set({ session, user: session?.user ?? null }),
   setProfile: (profile) => set({ profile }),
+  setSuperUser: (superUser) => set({ superUser }),
   setLoading: (loading) => set({ loading }),
 
   initialize: async () => {
     try {
       const supabase = getSupabaseClient();
 
-      // Get current session
       const { data: { session } } = await supabase.auth.getSession();
       set({ session, user: session?.user ?? null });
 
       if (session?.user) {
-        // Fetch user profile
-        const { data: profile } = await supabase
-          .from('users')
-          .select('*')
-          .eq('user_id', session.user.id)
-          .single();
-
-        set({ profile: profile as UserProfile | null });
+        await resolveUserType(session.user, supabase, set);
       }
 
-      // Listen for auth changes
       supabase.auth.onAuthStateChange(async (_event, session) => {
         set({ session, user: session?.user ?? null });
 
         if (session?.user) {
-          const { data: profile } = await supabase
-            .from('users')
-            .select('*')
-            .eq('user_id', session.user.id)
-            .single();
-          set({ profile: profile as UserProfile | null });
+          await resolveUserType(session.user, supabase, set);
         } else {
-          set({ profile: null });
+          set({ profile: null, superUser: null, userType: null });
         }
       });
     } catch {
-      console.warn('Auth initialization failed — Supabase may not be configured yet.');
+      console.warn('Auth initialization failed.');
     } finally {
       set({ loading: false });
     }
@@ -73,10 +66,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const supabase = getSupabaseClient();
       const { error } = await supabase.auth.signInWithPassword({ email, password });
-
       if (error) return { error: error.message };
-
-      // Profile will be loaded by the auth state listener
       return { error: null };
     } catch (err) {
       return { error: (err as Error).message };
@@ -93,26 +83,24 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     sessionStorage.removeItem('pos_session');
     sessionStorage.removeItem('pos_store_id');
     sessionStorage.removeItem('pos_store_name');
-    set({ session: null, user: null, profile: null });
+    set({ session: null, user: null, profile: null, superUser: null, userType: null });
   },
 
   changePassword: async (newPassword) => {
     try {
       const supabase = getSupabaseClient();
       const { data, error } = await supabase.auth.updateUser({ password: newPassword });
-      
+
       if (error) return { error: error.message };
 
       if (data.user) {
-        // Update flag in database
         const { error: dbError } = await supabase
           .from('users')
           .update({ requires_password_change: false })
           .eq('user_id', data.user.id);
-        
+
         if (dbError) return { error: dbError.message };
 
-        // Update local profile state
         const currentProfile = get().profile;
         if (currentProfile) {
           set({ profile: { ...currentProfile, requires_password_change: false } });
@@ -125,3 +113,67 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     }
   },
 }));
+
+async function resolveUserType(
+  user: User,
+  supabase: ReturnType<typeof getSupabaseClient>,
+  set: (partial: Partial<AuthState>) => void,
+) {
+  const meta = user.user_metadata || {};
+
+  // Check if super admin / support (exists in public.super_users)
+  if (meta.is_super_admin || meta.is_support) {
+    const { data: su } = await supabase
+      .from('super_users')
+      .select('*')
+      .eq('super_user_id', user.id)
+      .single();
+
+    if (su) {
+      set({
+        superUser: su as SuperUser,
+        profile: null,
+        userType: su.role === 'support' ? 'support' : 'super_admin',
+      });
+      return;
+    }
+  }
+
+  // Check if tenant user (has tenant_schema in metadata)
+  const tenantSchema = meta.tenant_schema;
+  if (tenantSchema) {
+    const { data: profile } = await supabase
+      .from('users')
+      .select('*')
+      .eq('user_id', user.id)
+      .single();
+
+    if (profile) {
+      set({
+        profile: profile as UserProfile,
+        superUser: null,
+        userType: profile.role === 'admin' ? 'tenant_admin' : 'tenant_user',
+      });
+      return;
+    }
+  }
+
+  // Fallback: try fetching from public schema anyway (legacy / direct lookup)
+  const { data: fallbackProfile } = await supabase
+    .from('users')
+    .select('*')
+    .eq('user_id', user.id)
+    .single();
+
+  if (fallbackProfile) {
+    set({
+      profile: fallbackProfile as UserProfile,
+      superUser: null,
+      userType: 'tenant_admin',
+    });
+    return;
+  }
+
+  // No match found — user exists in auth but not in our tables
+  set({ profile: null, superUser: null, userType: null });
+}

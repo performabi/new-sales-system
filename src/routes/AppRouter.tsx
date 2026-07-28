@@ -1,23 +1,37 @@
-// src/routes/AppRouter.tsx
 import { useEffect } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 
 import AppLayout from '../components/Layout/AppLayout';
+import AdminLayout from '../pages/admin/AdminLayout';
 import TerminalLayout from '../components/Layout/TerminalLayout';
 import ForceChangePassword from '../components/Auth/ForceChangePassword';
+
 import Landing from '../pages/Landing';
-import Dashboard from '../pages/Dashboard';
-import Stores from '../pages/Stores';
-import Users from '../pages/Users';
-import Inventory from '../pages/Inventory';
-import Plu from '../pages/Plu';
-import PluCategories from '../pages/PluCategories';
-import ItemSizing from '../pages/ItemSizing';
-import Logbook from '../pages/Logbook';
-import Suppliers from '../pages/Suppliers';
-import PurchaseOrders from '../pages/PurchaseOrders';
-import PurchaseOrderCreate from '../pages/PurchaseOrderCreate';
+
+import AdminDashboard from '../pages/admin/Dashboard';
+import AdminTenants from '../pages/admin/Tenants';
+import AdminTenantProvision from '../pages/admin/TenantProvision';
+import AdminSuperUsers from '../pages/admin/SuperUsers';
+import AdminPlans from '../pages/admin/Plans';
+
+import Dashboard from '../pages/app/Dashboard';
+import Stores from '../pages/app/Stores';
+import Users from '../pages/app/Users';
+import Inventory from '../pages/app/Inventory';
+import Plu from '../pages/app/Plu';
+import PluCategories from '../pages/app/PluCategories';
+import ItemSizing from '../pages/app/ItemSizing';
+import Logbook from '../pages/app/Logbook';
+import Suppliers from '../pages/app/Suppliers';
+import PurchaseOrders from '../pages/app/PurchaseOrders';
+import PurchaseOrderCreate from '../pages/app/PurchaseOrderCreate';
+import StoreChecklists from '../pages/app/StoreChecklists';
+import CurrencyConfig from '../pages/app/CurrencyConfig';
+import CashbackConfig from '../pages/app/CashbackConfig';
+import LoyaltyCards from '../pages/app/LoyaltyCards';
+import LoyaltyNotifications from '../pages/app/LoyaltyNotifications';
+
 import PosDashboard from '../pages/pos/Dashboard';
 import PosStoreSelect from '../pages/pos/StoreSelect';
 import PosClock from '../pages/pos/Clock';
@@ -25,34 +39,41 @@ import PosChecklists from '../pages/pos/Checklists';
 import PosGoodsIn from '../pages/pos/GoodsIn';
 import PosTill from '../pages/pos/Till';
 import PosTransactions from '../pages/pos/Transactions';
-import StoreChecklists from '../pages/headoffice/StoreChecklists';
-import CurrencyConfig from '../pages/headoffice/CurrencyConfig';
-import CashbackConfig from '../pages/headoffice/CashbackConfig';
-import LoyaltyCards from '../pages/headoffice/LoyaltyCards';
-import LoyaltyNotifications from '../pages/headoffice/LoyaltyNotifications';
 import LoyaltyRegister from '../pages/loyalty/Register';
 import Faq from '../pages/help/Faq';
 
-function ProtectedRoute({ children, requireAdmin = false }: { children: React.ReactNode; requireAdmin?: boolean }) {
-  const { session, profile, loading } = useAuthStore();
+function LoadingSpinner() {
+  return (
+    <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <div className="spinner" style={{ borderColor: 'var(--border-medium)', borderTopColor: 'var(--primary)' }}></div>
+    </div>
+  );
+}
 
-  if (loading) {
-    return (
-      <div style={{ height: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-        <div className="spinner" style={{ borderColor: 'var(--border-medium)', borderTopColor: 'var(--primary)' }}></div>
-      </div>
-    );
+function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const { session, profile, superUser, userType, loading } = useAuthStore();
+
+  if (loading) return <LoadingSpinner />;
+  if (!session) return <Navigate to="/" replace />;
+
+  if (profile?.requires_password_change) {
+    return <ForceChangePassword />;
   }
 
-  if (!session) {
-    return <Navigate to="/" replace />;
-  }
+  return <>{children}</>;
+}
 
-  if (requireAdmin && profile?.role === 'user') {
+function AdminRoute({ children }: { children: React.ReactNode }) {
+  const { session, superUser, userType, loading } = useAuthStore();
+
+  if (loading) return <LoadingSpinner />;
+  if (!session) return <Navigate to="/" replace />;
+
+  if (!superUser || !(userType === 'super_admin' || userType === 'support')) {
     return (
       <div style={{ padding: '40px', textAlign: 'center' }}>
         <h2>Access Denied</h2>
-        <p>Standard users cannot access the Head Office portal.</p>
+        <p>Only system administrators can access this area.</p>
         <button className="btn btn-primary" onClick={() => useAuthStore.getState().signOut()} style={{ marginTop: '20px' }}>
           Logout
         </button>
@@ -60,8 +81,25 @@ function ProtectedRoute({ children, requireAdmin = false }: { children: React.Re
     );
   }
 
-  if (profile?.requires_password_change) {
-    return <ForceChangePassword />;
+  return <>{children}</>;
+}
+
+function AdminOnlyRoute({ children }: { children: React.ReactNode }) {
+  const { session, userType, loading } = useAuthStore();
+
+  if (loading) return <LoadingSpinner />;
+  if (!session) return <Navigate to="/" replace />;
+
+  if (userType !== 'super_admin') {
+    return (
+      <div style={{ padding: '40px', textAlign: 'center' }}>
+        <h2>Access Denied</h2>
+        <p>Only super admins can perform this action.</p>
+        <button className="btn btn-primary" onClick={() => useAuthStore.getState().signOut()} style={{ marginTop: '20px' }}>
+          Logout
+        </button>
+      </div>
+    );
   }
 
   return <>{children}</>;
@@ -80,9 +118,32 @@ export default function AppRouter() {
         <Route path="/" element={<Landing />} />
 
         <Route
-          path="/headoffice"
+          path="/admin"
           element={
-            <ProtectedRoute requireAdmin={true}>
+            <AdminRoute>
+              <AdminLayout />
+            </AdminRoute>
+          }
+        >
+          <Route index element={<Navigate to="dashboard" replace />} />
+          <Route path="dashboard" element={<AdminDashboard />} />
+          <Route path="tenants" element={<AdminTenants />} />
+          <Route
+            path="tenants/provision"
+            element={
+              <AdminOnlyRoute>
+                <AdminTenantProvision />
+              </AdminOnlyRoute>
+            }
+          />
+          <Route path="super-users" element={<AdminSuperUsers />} />
+          <Route path="plans" element={<AdminPlans />} />
+        </Route>
+
+        <Route
+          path="/app"
+          element={
+            <ProtectedRoute>
               <AppLayout />
             </ProtectedRoute>
           }
@@ -109,6 +170,7 @@ export default function AppRouter() {
 
         <Route path="/pos/select-store" element={<PosStoreSelect />} />
         <Route path="/loyalty/register" element={<LoyaltyRegister />} />
+
         <Route
           path="/pos"
           element={<TerminalLayout />}
