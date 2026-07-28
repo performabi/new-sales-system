@@ -1706,6 +1706,27 @@ export function apiPlugin(): Plugin {
         }
       });
 
+      // ---- Admin: change password (uses service_role, bypasses session checks) ----
+      app.post('/api/admin/settings/change-password', async (req, res) => {
+        try {
+          const { user_id, new_password } = req.body;
+          if (!user_id || !new_password) {
+            return res.status(400).json({ error: 'user_id and new_password required' });
+          }
+          if (new_password.length < 6) {
+            return res.status(400).json({ error: 'Password must be at least 6 characters' });
+          }
+          const supabaseAdmin = getSupabaseAdmin(server, 'public');
+          const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(user_id, {
+            password: new_password,
+          });
+          if (authError) return res.status(400).json({ error: authError.message });
+          return res.json({ success: true });
+        } catch (err) {
+          return res.status(500).json({ error: 'Failed to change password' });
+        }
+      });
+
       // Mount Express app onto Vite's dev server
       server.middlewares.use(app);
     },

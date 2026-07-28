@@ -40,15 +40,24 @@ export default function AdminSettings() {
     if (newPw.length < 6) { setPwMsg('Minimum 6 characters'); return; }
     if (newPw !== confirmPw) { setPwMsg('Passwords do not match'); return; }
     setChangingPw(true);
-    const supabase = getSupabaseClient();
-    const { error } = await supabase.auth.updateUser({ password: newPw });
-    setChangingPw(false);
-    if (error) {
-      setPwMsg('Error: ' + error.message);
-    } else {
-      setPwMsg('Password changed');
-      setNewPw('');
-      setConfirmPw('');
+    try {
+      const res = await fetch('/api/admin/settings/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ user_id: superUser?.super_user_id, new_password: newPw }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setPwMsg('Error: ' + (data.error || 'request failed'));
+      } else {
+        setPwMsg('Password changed');
+        setNewPw('');
+        setConfirmPw('');
+      }
+    } catch {
+      setPwMsg('Error: network error');
+    } finally {
+      setChangingPw(false);
     }
   };
 

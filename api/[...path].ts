@@ -857,6 +857,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.json(data);
     }
 
+    // ---- Admin: change password (uses service_role, bypasses session checks) ----
+    if (path[0] === 'admin' && path[1] === 'settings' && path[2] === 'change-password' && method === 'POST') {
+      const { user_id, new_password } = body;
+      if (!user_id || !new_password) {
+        return res.status(400).json({ error: 'user_id and new_password required' });
+      }
+      if (new_password.length < 6) {
+        return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      }
+      const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(user_id, {
+        password: new_password,
+      });
+      if (authError) return res.status(400).json({ error: authError.message });
+      return res.json({ success: true });
+    }
+
     return res.status(404).json({ error: `Route not found: /api/${path.join('/')}` });
   } catch (err) {
     console.error('Server error:', err);
