@@ -15,6 +15,7 @@ import AdminTenants from '../pages/admin/Tenants';
 import AdminTenantProvision from '../pages/admin/TenantProvision';
 import AdminSuperUsers from '../pages/admin/SuperUsers';
 import AdminPlans from '../pages/admin/Plans';
+import AdminSettings from '../pages/admin/Settings';
 
 import Dashboard from '../pages/app/Dashboard';
 import Stores from '../pages/app/Stores';
@@ -140,6 +141,7 @@ export default function AppRouter() {
           />
           <Route path="super-users" element={<AdminSuperUsers />} />
           <Route path="plans" element={<AdminPlans />} />
+          <Route path="settings" element={<AdminSettings />} />
         </Route>
 
         <Route

@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { path: '/admin/tenants', label: 'Tenants', icon: '🏢' },
   { path: '/admin/super-users', label: 'Team', icon: '👥' },
   { path: '/admin/plans', label: 'Plans', icon: '📋' },
+  { path: '/admin/settings', label: 'Settings', icon: '⚙️' },
 ];
 
 export default function AdminLayout() {
