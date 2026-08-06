@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { apiFetch } from '../../lib/api';
 
 interface PosStore {
   store_id: string;
@@ -17,7 +18,7 @@ export default function PosStoreSelect() {
   const fetchStores = () => {
     setLoading(true);
     setError(null);
-    fetch('/api/stores')
+    apiFetch('/api/stores')
       .then((r) => {
         if (!r.ok) throw new Error('Failed to load stores');
         return r.json();

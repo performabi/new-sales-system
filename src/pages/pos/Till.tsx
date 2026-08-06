@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAppStore } from '../../store/appStore';
+import { apiFetch } from '../../lib/api';
 import { deviceManager } from '../../devices/DeviceManager';
 import CategoryBar from '../../components/Pos/CategoryBar';
 import PluGrid from '../../components/Pos/PluGrid';
@@ -71,7 +72,7 @@ export default function Till() {
       const interval = setInterval(read, 2000);
       return () => clearInterval(interval);
     }
-    fetch('/api/settings/currency')
+    apiFetch('/api/settings/currency')
       .then((r) => r.json())
       .then((c) => setCurrencyConfig(c))
       .catch(() => {});
@@ -129,7 +130,7 @@ export default function Till() {
     if (plu) return plu;
     // Try fetching via API
     try {
-      const res = await fetch(`/api/plu/ean/${encodeURIComponent(barcode)}`);
+      const res = await apiFetch(`/api/plu/ean/${encodeURIComponent(barcode)}`);
       if (res.ok) {
         const data = await res.json();
         return data;

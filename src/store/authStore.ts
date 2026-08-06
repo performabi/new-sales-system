@@ -157,6 +157,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const supabase = getSupabaseClient();
       const { error } = await supabase.auth.updateUser({ password: newPassword });
       if (error) return { error: error.message };
+      await get().signOut();
       set({ isRecoveryMode: false });
       return { error: null };
     } catch (err) {
@@ -196,15 +197,16 @@ async function resolveUserType(
     const tenantClient = getSupabaseClient(tenantSchema);
     const { data: profile } = await tenantClient
       .from('users')
-      .select('*')
+      .select('*, stores!users_assigned_store_id_fkey(name)')
       .eq('user_id', user.id)
       .single();
 
     if (profile) {
+      const raw = profile as UserProfile & { stores?: { name: string } | null };
       set({
-        profile: profile as UserProfile,
+        profile: { ...raw, assigned_store_name: raw.stores?.name ?? undefined },
         superUser: null,
-        userType: profile.role === 'admin' ? 'tenant_admin' : 'tenant_user',
+        userType: raw.role === 'admin' ? 'tenant_admin' : 'tenant_user',
       });
       return;
     }

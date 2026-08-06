@@ -45,9 +45,9 @@ export default function ResetPassword() {
           <div style={{ fontSize: '3rem', marginBottom: '16px' }}>✅</div>
           <h2>Password Changed</h2>
           <p style={{ color: 'var(--text-muted)', marginTop: '8px', marginBottom: '24px' }}>
-            Your password has been updated successfully.
+            Your password has been updated. You can now sign in with your new password.
           </p>
-          <p style={{ fontSize: '0.85rem', color: 'var(--primary)' }}>Redirecting...</p>
+          <p style={{ fontSize: '0.85rem', color: 'var(--primary)' }}>Redirecting to login...</p>
         </div>
       </div>
     );
