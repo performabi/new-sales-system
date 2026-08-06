@@ -1818,7 +1818,7 @@ export function apiPlugin(): Plugin {
           const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(user_id);
           if (!authUser?.user) return res.status(404).json({ error: 'Auth user not found' });
 
-          const authUpdate: any = { data: { ...(authUser.user.user_metadata || {}), full_name } };
+          const authUpdate: any = { user_metadata: { ...(authUser.user.user_metadata || {}), full_name } };
           if (email !== authUser.user.email) authUpdate.email = email;
           const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(user_id, authUpdate);
           if (authError) return res.status(400).json({ error: authError.message });
