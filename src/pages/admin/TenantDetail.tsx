@@ -290,7 +290,7 @@ export default function AdminTenantDetail() {
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px', alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '20px' }}>
         {/* ---- Company card: edit form only ---- */}
         <div className="card">
           <h2 style={{ fontSize: '1.2rem', marginBottom: '16px' }}>Company</h2>
