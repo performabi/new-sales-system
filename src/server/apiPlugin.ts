@@ -1720,6 +1720,45 @@ export function apiPlugin(): Plugin {
         }
       });
 
+      // ---- Admin: invite tenant main user (when none exists) ----
+      app.post('/api/admin/tenants/:tenantId/main-user', async (req, res) => {
+        try {
+          const supabaseAdmin = getSupabaseAdmin(server, 'public');
+          const { data: tenant } = await supabaseAdmin.from('tenants').select('*').eq('tenant_id', req.params.tenantId).maybeSingle();
+          if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+          const { email, full_name } = req.body;
+          if (!email || !full_name) return res.status(400).json({ error: 'email and full_name required' });
+
+          const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+          const existing = (authUsers?.users || []).find((u: any) => u.user_metadata?.tenant_schema === tenant.schema_name);
+          if (existing) return res.status(400).json({ error: 'This tenant already has a main user' });
+
+          const { data: inviteData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+            data: { tenant_schema: tenant.schema_name, is_tenant_admin: true, full_name },
+          });
+          if (inviteError) return res.status(400).json({ error: inviteError.message });
+
+          let warning: string | null = null;
+          try {
+            const tenantAdmin = getSupabaseAdmin(server, tenant.schema_name);
+            const { error: dbError } = await tenantAdmin.from('users').insert({
+              user_id: inviteData?.user?.id,
+              username: email.split('@')[0],
+              email,
+              full_name,
+              role: 'super_user',
+              is_active: true,
+            });
+            if (dbError) warning = `Invite sent, but tenant profile could not be created: ${dbError.message}`;
+          } catch (e: any) {
+            warning = `Invite sent, but tenant profile could not be created: ${e.message}`;
+          }
+          return res.json({ success: true, user_id: inviteData?.user?.id, ...(warning ? { warning } : {}) });
+        } catch (err: any) {
+          return res.status(500).json({ error: err.message || 'Failed to invite main user' });
+        }
+      });
+
       // ---- Admin: get tenant main user ----
       app.get('/api/admin/tenants/:tenantId/main-user', async (req, res) => {
         try {

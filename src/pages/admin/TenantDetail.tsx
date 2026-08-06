@@ -59,6 +59,11 @@ export default function AdminTenantDetail() {
   const [resending, setResending] = useState(false);
   const [resendMsg, setResendMsg] = useState<string | null>(null);
 
+  const [inviteEmail, setInviteEmail] = useState('');
+  const [inviteName, setInviteName] = useState('');
+  const [inviting, setInviting] = useState(false);
+  const [inviteMsg, setInviteMsg] = useState<string | null>(null);
+
   const [tempPwd, setTempPwd] = useState('');
   const [pwdSaving, setPwdSaving] = useState(false);
   const [pwdMsg, setPwdMsg] = useState<string | null>(null);
@@ -180,6 +185,26 @@ export default function AdminTenantDetail() {
       setResendMsg(`Error: ${(e as Error).message}`);
     } finally {
       setResending(false);
+    }
+  };
+
+  const inviteMainUser = async () => {
+    if (!tenant) return;
+    setInviting(true);
+    setInviteMsg(null);
+    try {
+      const res = await fetch(`/api/admin/tenants/${tenant.tenant_id}/main-user`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: inviteEmail, full_name: inviteName }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to invite');
+      setInviteMsg((data.warning ? `${data.warning} ` : '') + 'Invitation email sent');
+    } catch (e) {
+      setInviteMsg(`Error: ${(e as Error).message}`);
+    } finally {
+      setInviting(false);
     }
   };
 
@@ -310,7 +335,26 @@ export default function AdminTenantDetail() {
               <div className="spinner" style={{ borderColor: 'var(--border-medium)', borderTopColor: 'var(--primary)' }}></div>
             </div>
           ) : !mainUser ? (
-            <p style={{ color: 'var(--text-muted)' }}>No main user found for this tenant.</p>
+            <>
+              <p style={{ color: 'var(--text-muted)', marginBottom: '20px' }}>
+                No main user found for this tenant. Invite one to grant them access.
+              </p>
+              <label className="form-label">Full name</label>
+              <input className="form-input" value={inviteName} onChange={(e) => setInviteName(e.target.value)} />
+
+              <label className="form-label">Email</label>
+              <input className="form-input" type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} />
+
+              <div style={{ marginTop: '20px' }}>
+                <button className="btn btn-primary" onClick={inviteMainUser} disabled={inviting || !inviteEmail || !inviteName}>
+                  {inviting ? 'Sending…' : 'Invite main user'}
+                </button>
+              </div>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '6px' }}>
+                An invitation email will be sent so they can set their password and access the tenant.
+              </p>
+              <StatusMessage msg={inviteMsg} />
+            </>
           ) : (
             <>
               <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '10px 16px', fontSize: '0.9rem', marginBottom: '20px' }}>
