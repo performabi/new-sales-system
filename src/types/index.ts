@@ -280,6 +280,7 @@ export interface Tenant {
   created_at: string;
   created_by?: string | null;
   plan_name?: string;
+  subscription_status?: string | null;
   user_count?: number;
   store_count?: number;
 }

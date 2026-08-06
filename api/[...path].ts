@@ -829,6 +829,161 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.json(enriched);
     }
 
+    // ---- Admin: update tenant ----
+    if (path[0] === 'admin' && path[1] === 'tenants' && path[2] && path.length === 3 && method === 'PUT') {
+      const { data: existing } = await supabaseAdmin.from('tenants').select('tenant_id').eq('tenant_id', path[2]).maybeSingle();
+      if (!existing) return res.status(404).json({ error: 'Tenant not found' });
+
+      const update: Record<string, any> = {};
+      if (body.name !== undefined) update.name = String(body.name).trim();
+      if (body.domain !== undefined) update.domain = body.domain ? String(body.domain).trim() : null;
+      if (body.is_active !== undefined) update.is_active = !!body.is_active;
+      if (body.slug !== undefined) {
+        const slug = String(body.slug).trim().toLowerCase();
+        if (!/^[a-z0-9-]+$/.test(slug)) {
+          return res.status(400).json({ error: 'Slug can only contain lowercase letters, numbers, and hyphens' });
+        }
+        const { data: clash } = await supabaseAdmin.from('tenants').select('tenant_id').eq('slug', slug).neq('tenant_id', path[2]).maybeSingle();
+        if (clash) return res.status(400).json({ error: 'Slug already in use by another tenant' });
+        update.slug = slug;
+      }
+      if (body.plan_id !== undefined && body.plan_id) update.plan_id = body.plan_id;
+
+      if (Object.keys(update).length === 0) return res.status(400).json({ error: 'No fields to update' });
+
+      const { error: updError } = await supabaseAdmin.from('tenants').update(update).eq('tenant_id', path[2]);
+      if (updError) return res.status(400).json({ error: updError.message });
+
+      if (update.plan_id) {
+        const { data: sub } = await supabaseAdmin.from('tenant_subscriptions').select('subscription_id').eq('tenant_id', path[2]).maybeSingle();
+        if (sub) {
+          const { error: subError } = await supabaseAdmin.from('tenant_subscriptions')
+            .update({ plan_id: update.plan_id, status: 'active', starts_at: new Date().toISOString() })
+            .eq('subscription_id', sub.subscription_id);
+          if (subError) return res.status(400).json({ error: subError.message });
+        } else {
+          const { error: subError } = await supabaseAdmin.from('tenant_subscriptions')
+            .insert({ tenant_id: path[2], plan_id: update.plan_id, status: 'active' });
+          if (subError) return res.status(400).json({ error: subError.message });
+        }
+      }
+      return res.json({ success: true });
+    }
+
+    // ---- Admin: get tenant main user ----
+    if (path[0] === 'admin' && path[1] === 'tenants' && path[2] && path[3] === 'main-user' && method === 'GET') {
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('*').eq('tenant_id', path[2]).maybeSingle();
+      if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+
+      let dbRow: any = null;
+      try {
+        const tenantAdmin = getSupabaseAdmin(tenant.schema_name);
+        const { data, error } = await tenantAdmin.from('users')
+          .select('*').eq('role', 'super_user').order('created_at', { ascending: true }).limit(1).maybeSingle();
+        if (!error && data) dbRow = data;
+      } catch { /* tenant schema may not exist yet */ }
+
+      const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+      const metaMatch = (authUsers?.users || []).find((u: any) => u.user_metadata?.tenant_schema === tenant.schema_name);
+      const authUser = dbRow
+        ? (authUsers?.users || []).find((u: any) => u.id === dbRow.user_id) || metaMatch
+        : metaMatch;
+
+      if (!authUser && !dbRow) return res.status(404).json({ error: 'No main user found for this tenant' });
+
+      return res.json({
+        user_id: dbRow?.user_id || authUser?.id,
+        email: dbRow?.email || authUser?.email,
+        full_name: dbRow?.full_name || authUser?.user_metadata?.full_name || '',
+        username: dbRow?.username || (authUser?.email ? authUser.email.split('@')[0] : ''),
+        role: dbRow?.role || 'super_user',
+        is_active: dbRow?.is_active ?? true,
+        requires_password_change: !!dbRow?.requires_password_change,
+        auth: {
+          confirmed_at: authUser?.confirmed_at || null,
+          last_sign_in_at: authUser?.last_sign_in_at || null,
+          invited_at: authUser?.created_at || null,
+        },
+      });
+    }
+
+    // ---- Admin: update tenant main user ----
+    if (path[0] === 'admin' && path[1] === 'tenants' && path[2] && path[3] === 'main-user' && method === 'PUT') {
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('schema_name').eq('tenant_id', path[2]).maybeSingle();
+      if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+      const { user_id, full_name, username, email, is_active } = body;
+      if (!user_id || !full_name || !username || !email) {
+        return res.status(400).json({ error: 'user_id, full_name, username, and email required' });
+      }
+
+      const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(user_id);
+      if (!authUser?.user) return res.status(404).json({ error: 'Auth user not found' });
+
+      const authUpdate: any = { data: { ...(authUser.user.user_metadata || {}), full_name } };
+      if (email !== authUser.user.email) authUpdate.email = email;
+      const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(user_id, authUpdate);
+      if (authError) return res.status(400).json({ error: authError.message });
+
+      let warning: string | null = null;
+      try {
+        const tenantAdmin = getSupabaseAdmin(tenant.schema_name);
+        const { error: dbError } = await tenantAdmin.from('users')
+          .update({ full_name, username, email, is_active: !!is_active })
+          .eq('user_id', user_id);
+        if (dbError) warning = `Auth user updated, but tenant profile could not be updated: ${dbError.message}`;
+      } catch (e) {
+        warning = `Auth user updated, but tenant profile could not be updated: ${(e as Error).message}`;
+      }
+      return res.json({ success: true, ...(warning ? { warning } : {}) });
+    }
+
+    // ---- Admin: resend tenant main user access email ----
+    if (path[0] === 'admin' && path[1] === 'tenants' && path[2] && path[3] === 'main-user' && path[4] === 'resend-invite' && method === 'POST') {
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('schema_name').eq('tenant_id', path[2]).maybeSingle();
+      if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+      const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+      const authUser = (authUsers?.users || []).find((u: any) => u.user_metadata?.tenant_schema === tenant.schema_name);
+      if (!authUser) return res.status(404).json({ error: 'No main user found for this tenant' });
+
+      if (!authUser.confirmed_at) {
+        const { error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(authUser.email!, {
+          data: { tenant_schema: tenant.schema_name, is_tenant_admin: true },
+        });
+        if (inviteError) return res.status(400).json({ error: inviteError.message });
+        return res.json({ success: true, method: 'invite' });
+      }
+
+      const anon = createClient(process.env.VITE_SUPABASE_URL || '', process.env.VITE_SUPABASE_ANON_KEY || '');
+      const { error: resetError } = await anon.auth.resetPasswordForEmail(authUser.email!, {
+        redirectTo: process.env.APP_URL || req.headers.origin || undefined,
+      });
+      if (resetError) return res.status(400).json({ error: resetError.message });
+      return res.json({ success: true, method: 'recovery' });
+    }
+
+    // ---- Admin: reset tenant main user password ----
+    if (path[0] === 'admin' && path[1] === 'tenants' && path[2] && path[3] === 'main-user' && path[4] === 'reset-password' && method === 'POST') {
+      const { user_id, new_password } = body;
+      if (!user_id || !new_password) return res.status(400).json({ error: 'user_id and new_password required' });
+      if (new_password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('schema_name').eq('tenant_id', path[2]).maybeSingle();
+      if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+
+      const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(user_id, { password: new_password });
+      if (authError) return res.status(400).json({ error: authError.message });
+
+      let warning: string | null = null;
+      try {
+        const tenantAdmin = getSupabaseAdmin(tenant.schema_name);
+        const { error: dbError } = await tenantAdmin.from('users')
+          .update({ requires_password_change: true }).eq('user_id', user_id);
+        if (dbError) warning = `Password updated, but force-change flag could not be set: ${dbError.message}`;
+      } catch (e) {
+        warning = `Password updated, but force-change flag could not be set: ${(e as Error).message}`;
+      }
+      return res.json({ success: true, ...(warning ? { warning } : {}) });
+    }
+
     // ---- Admin: list stores for a given tenant schema ----
     if (path[0] === 'admin' && path[1] === 'stores' && method === 'GET') {
       const schema = (req.query as any).schema as string;
