@@ -20,7 +20,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: (e as Error).message });
   }
 
-  const path = (req.query.path as string[]) || [];
+  const rawPath = req.query.path;
+  let path: string[] = [];
+  if (Array.isArray(rawPath)) path = rawPath.map(String);
+  else if (typeof rawPath === 'string') path = rawPath.split('/').filter(Boolean);
   const method = req.method || 'GET';
   const body = req.body || {};
 

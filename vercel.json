@@ -17,7 +17,7 @@
     },
     {
       "source": "/api/(.*)",
-      "destination": "/api/[...path]"
+      "destination": "/api/[...path]?path=$1"
     },
     {
       "source": "/(.*)",
