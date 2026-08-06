@@ -817,7 +817,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // ---- Admin: list tenants ----
-    if (path[0] === 'admin' && path[1] === 'tenants' && method === 'GET') {
+    if (path[0] === 'admin' && path[1] === 'tenants' && path.length === 2 && method === 'GET') {
       const { data: tenants } = await supabaseAdmin.from('tenants').select('*').order('created_at', { ascending: false });
       const { data: subs } = await supabaseAdmin.from('tenant_subscriptions').select('*, plans(name)');
       const subMap = new Map((subs || []).map((s: any) => [s.tenant_id, s]));
