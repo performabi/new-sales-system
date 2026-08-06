@@ -1,9 +1,11 @@
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-let publicClient: SupabaseClient | null = null;
-const schemaClients: Record<string, SupabaseClient> = {};
+type AnySchemaClient = SupabaseClient<any, any, any>;
 
-export function getSupabaseClient(schema?: string): SupabaseClient {
+let publicClient: AnySchemaClient | null = null;
+const schemaClients: Record<string, AnySchemaClient> = {};
+
+export function getSupabaseClient(schema?: string): AnySchemaClient {
   const url = import.meta.env.VITE_SUPABASE_URL ?? '';
   const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY ?? '';
 
