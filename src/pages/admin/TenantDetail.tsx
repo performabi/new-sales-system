@@ -247,6 +247,13 @@ export default function AdminTenantDetail() {
   }
 
   const confirmed = !!mainUser?.auth.confirmed_at;
+  const initials = (mainUser?.full_name || mainUser?.email || '?')
+    .split(' ')
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((s) => s[0])
+    .join('')
+    .toUpperCase();
 
   return (
     <div style={{ maxWidth: '1100px' }}>
@@ -258,27 +265,35 @@ export default function AdminTenantDetail() {
         ← Back to Tenants
       </button>
 
+      {/* ---- Header strip: read-only summary ---- */}
+      <div className="card" style={{ marginBottom: '20px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '14px' }}>
+          <h2 style={{ margin: 0 }}>{tenant.name}</h2>
+          <span className={`badge ${tenant.is_active ? 'badge-success' : 'badge-danger'}`}>
+            {tenant.is_active ? 'Active' : 'Inactive'}
+          </span>
+          {tenant.plan_name && <span className="badge badge-info">{tenant.plan_name}</span>}
+          {tenant.subscription_status && (
+            <span className="badge badge-secondary">{tenant.subscription_status}</span>
+          )}
+        </div>
+        <div style={{ display: 'flex', gap: '24px', flexWrap: 'wrap', fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+          <span>
+            Tenant ID <span style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>{tenant.tenant_id}</span>
+          </span>
+          <span>
+            Schema <span style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>{tenant.schema_name}</span>
+          </span>
+          <span>
+            Created <span style={{ color: 'var(--text-primary)' }}>{new Date(tenant.created_at).toLocaleDateString()}</span>
+          </span>
+        </div>
+      </div>
+
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px', alignItems: 'start' }}>
-        {/* ---- Tenant info card ---- */}
+        {/* ---- Company card: edit form only ---- */}
         <div className="card">
-          <h2 style={{ marginBottom: '20px' }}>{tenant.name}</h2>
-
-          <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '10px 16px', fontSize: '0.9rem', marginBottom: '24px' }}>
-            <span style={{ color: 'var(--text-muted)' }}>Tenant ID</span>
-            <span style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{tenant.tenant_id}</span>
-            <span style={{ color: 'var(--text-muted)' }}>Schema</span>
-            <span style={{ fontFamily: 'monospace', fontSize: '0.85rem' }}>{tenant.schema_name}</span>
-            <span style={{ color: 'var(--text-muted)' }}>Status</span>
-            <span>
-              <span className={`badge ${tenant.is_active ? 'badge-success' : 'badge-danger'}`}>
-                {tenant.is_active ? 'Active' : 'Inactive'}
-              </span>
-            </span>
-            <span style={{ color: 'var(--text-muted)' }}>Created</span>
-            <span>{new Date(tenant.created_at).toLocaleDateString()}</span>
-          </div>
-
-          <h3 style={{ fontSize: '0.95rem', marginBottom: '16px', color: 'var(--text-muted)' }}>Edit company</h3>
+          <h2 style={{ fontSize: '1.2rem', marginBottom: '16px' }}>Company</h2>
 
           <label className="form-label">Company name</label>
           <input className="form-input" value={tName} onChange={(e) => setTName(e.target.value)} />
@@ -325,10 +340,7 @@ export default function AdminTenantDetail() {
 
         {/* ---- Main user card ---- */}
         <div className="card">
-          <h2 style={{ marginBottom: '4px', fontSize: '1.2rem' }}>Main User</h2>
-          <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginBottom: '20px' }}>
-            The administrator who manages this tenant
-          </p>
+          <h2 style={{ fontSize: '1.2rem', marginBottom: '16px' }}>Main User</h2>
 
           {mainUserLoading ? (
             <div style={{ textAlign: 'center', padding: '20px' }}>
@@ -357,23 +369,48 @@ export default function AdminTenantDetail() {
             </>
           ) : (
             <>
-              <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '10px 16px', fontSize: '0.9rem', marginBottom: '20px' }}>
-                <span style={{ color: 'var(--text-muted)' }}>Status</span>
-                <span>
-                  <span className={`badge ${confirmed ? 'badge-success' : 'badge-warning'}`}>
-                    {confirmed ? 'Confirmed' : 'Pending invitation'}
-                  </span>
-                  {!mainUser.is_active && <span className="badge badge-danger" style={{ marginLeft: '8px' }}>Disabled</span>}
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '12px' }}>
+                <div
+                  style={{
+                    width: '48px',
+                    height: '48px',
+                    borderRadius: '50%',
+                    background: 'var(--primary)',
+                    color: '#fff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontWeight: 600,
+                    fontSize: '1.1rem',
+                    flexShrink: 0,
+                  }}
+                >
+                  {initials}
+                </div>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 600 }}>{mainUser.full_name || mainUser.email}</div>
+                  <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem' }}>{mainUser.email}</div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '12px' }}>
+                <span className={`badge ${confirmed ? 'badge-success' : 'badge-warning'}`}>
+                  {confirmed ? 'Confirmed' : 'Pending invitation'}
                 </span>
+                {!mainUser.is_active && <span className="badge badge-danger">Disabled</span>}
+                {mainUser.requires_password_change && <span className="badge badge-warning">Must change password</span>}
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', gap: '6px 16px', fontSize: '0.9rem', marginBottom: '4px' }}>
                 <span style={{ color: 'var(--text-muted)' }}>Role</span>
                 <span>{mainUser.role}</span>
                 <span style={{ color: 'var(--text-muted)' }}>Last login</span>
                 <span>{mainUser.auth.last_sign_in_at ? new Date(mainUser.auth.last_sign_in_at).toLocaleString() : 'Never'}</span>
                 <span style={{ color: 'var(--text-muted)' }}>Invited</span>
                 <span>{mainUser.auth.invited_at ? new Date(mainUser.auth.invited_at).toLocaleString() : '—'}</span>
-                <span style={{ color: 'var(--text-muted)' }}>Force change</span>
-                <span>{mainUser.requires_password_change ? <span style={{ color: '#f59e0b' }}>Yes</span> : 'No'}</span>
               </div>
+
+              <hr style={{ border: 'none', borderTop: '1px solid var(--border-medium)', margin: '20px 0' }} />
 
               <h3 style={{ fontSize: '0.95rem', marginBottom: '16px', color: 'var(--text-muted)' }}>Edit user</h3>
 
