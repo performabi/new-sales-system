@@ -43,11 +43,12 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     try {
       const supabase = getSupabaseClient();
 
-      const { data: { session } } = await supabase.auth.getSession();
-      set({ session, user: session?.user ?? null });
-
-      if (session?.user) {
-        await resolveUserType(session.user, supabase, set);
+      const isRecoveryUrl =
+        typeof window !== 'undefined' &&
+        (window.location.search.includes('type=recovery') ||
+          window.location.hash.includes('type=recovery'));
+      if (isRecoveryUrl) {
+        set({ isRecoveryMode: true });
       }
 
       supabase.auth.onAuthStateChange(async (event, session) => {
@@ -68,6 +69,13 @@ export const useAuthStore = create<AuthState>((set, get) => ({
           console.warn('onAuthStateChange handler failed.');
         }
       });
+
+      const { data: { session } } = await supabase.auth.getSession();
+      set({ session, user: session?.user ?? null });
+
+      if (session?.user) {
+        await resolveUserType(session.user, supabase, set);
+      }
     } catch {
       console.warn('Auth initialization failed.');
     } finally {

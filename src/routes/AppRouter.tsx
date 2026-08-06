@@ -55,10 +55,11 @@ function LoadingSpinner() {
 }
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { session, profile, loading } = useAuthStore();
+  const { session, profile, loading, isRecoveryMode } = useAuthStore();
 
   if (loading) return <LoadingSpinner />;
   if (!session) return <Navigate to="/" replace />;
+  if (isRecoveryMode) return <Navigate to="/reset-password" replace />;
 
   if (profile?.requires_password_change) {
     return <ForceChangePassword />;
@@ -68,10 +69,11 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function AdminRoute({ children }: { children: React.ReactNode }) {
-  const { session, superUser, userType, loading } = useAuthStore();
+  const { session, superUser, userType, loading, isRecoveryMode } = useAuthStore();
 
   if (loading) return <LoadingSpinner />;
   if (!session) return <Navigate to="/" replace />;
+  if (isRecoveryMode) return <Navigate to="/reset-password" replace />;
 
   if (!superUser || !(userType === 'super_admin' || userType === 'support')) {
     return (
