@@ -949,6 +949,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!user_id || !full_name || !username || !email) {
         return res.status(400).json({ error: 'user_id, full_name, username, and email required' });
       }
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(user_id)) {
+        return res.status(400).json({ error: 'Invalid user_id' });
+      }
 
       const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(user_id);
       if (!authUser?.user) return res.status(404).json({ error: 'Auth user not found' });
@@ -1000,6 +1003,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { user_id, new_password } = body;
       if (!user_id || !new_password) return res.status(400).json({ error: 'user_id and new_password required' });
       if (new_password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(user_id)) {
+        return res.status(400).json({ error: 'Invalid user_id' });
+      }
       const { data: tenant } = await supabaseAdmin.from('tenants').select('schema_name').eq('tenant_id', path[2]).maybeSingle();
       if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
 
