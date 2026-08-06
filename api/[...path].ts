@@ -871,7 +871,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // ---- Admin: invite tenant main user (when none exists) ----
-    if (path[0] === 'admin' && path[1] === 'tenants' && path[2] && path[3] === 'main-user' && method === 'POST') {
+    if (path[0] === 'admin' && path[1] === 'tenants' && path[2] && path.length === 4 && path[3] === 'main-user' && method === 'POST') {
       const { data: tenant } = await supabaseAdmin.from('tenants').select('*').eq('tenant_id', path[2]).maybeSingle();
       if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
       const { email, full_name } = body;
@@ -905,7 +905,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // ---- Admin: get tenant main user ----
-    if (path[0] === 'admin' && path[1] === 'tenants' && path[2] && path[3] === 'main-user' && method === 'GET') {
+    if (path[0] === 'admin' && path[1] === 'tenants' && path[2] && path.length === 4 && path[3] === 'main-user' && method === 'GET') {
       const { data: tenant } = await supabaseAdmin.from('tenants').select('*').eq('tenant_id', path[2]).maybeSingle();
       if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
 
@@ -942,7 +942,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // ---- Admin: update tenant main user ----
-    if (path[0] === 'admin' && path[1] === 'tenants' && path[2] && path[3] === 'main-user' && method === 'PUT') {
+    if (path[0] === 'admin' && path[1] === 'tenants' && path[2] && path.length === 4 && path[3] === 'main-user' && method === 'PUT') {
       const { data: tenant } = await supabaseAdmin.from('tenants').select('schema_name').eq('tenant_id', path[2]).maybeSingle();
       if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
       const { user_id, full_name, username, email, is_active } = body;
