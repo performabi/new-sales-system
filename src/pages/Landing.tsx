@@ -61,7 +61,7 @@ export default function Landing() {
       <div className="card" style={{ maxWidth: '400px', width: '100%' }}>
         <div style={{ textAlign: 'center', marginBottom: '32px' }}>
           <div style={{ fontSize: '3rem', marginBottom: '16px' }}>🏢</div>
-          <h1>HEAD OFFICE</h1>
+          <h1>New Sales System</h1>
           <p style={{ marginTop: '8px' }}>Log in to access the portal</p>
         </div>
         {showForgot ? (
