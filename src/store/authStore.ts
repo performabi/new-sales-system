@@ -107,14 +107,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       if (error) return { error: error.message };
 
       if (data.user) {
-        const { error: dbError } = await supabase
-          .from('users')
-          .update({ requires_password_change: false })
-          .eq('user_id', data.user.id);
+        const state = get();
+        const tenantSchema = state.user?.user_metadata?.tenant_schema;
+        if (tenantSchema) {
+          const tenantClient = getSupabaseClient(tenantSchema);
+          const { error: dbError } = await tenantClient
+            .from('users')
+            .update({ requires_password_change: false })
+            .eq('user_id', data.user.id);
 
-        if (dbError) return { error: dbError.message };
+          if (dbError) return { error: dbError.message };
+        }
 
-        const currentProfile = get().profile;
+        const currentProfile = state.profile;
         if (currentProfile) {
           set({ profile: { ...currentProfile, requires_password_change: false } });
         }
@@ -180,7 +185,8 @@ async function resolveUserType(
   // Check if tenant user (has tenant_schema in metadata)
   const tenantSchema = meta.tenant_schema;
   if (tenantSchema) {
-    const { data: profile } = await supabase
+    const tenantClient = getSupabaseClient(tenantSchema);
+    const { data: profile } = await tenantClient
       .from('users')
       .select('*')
       .eq('user_id', user.id)
@@ -194,22 +200,6 @@ async function resolveUserType(
       });
       return;
     }
-  }
-
-  // Fallback: try fetching from public schema anyway (legacy / direct lookup)
-  const { data: fallbackProfile } = await supabase
-    .from('users')
-    .select('*')
-    .eq('user_id', user.id)
-    .single();
-
-  if (fallbackProfile) {
-    set({
-      profile: fallbackProfile as UserProfile,
-      superUser: null,
-      userType: 'tenant_admin',
-    });
-    return;
   }
 
   // No match found — user exists in auth but not in our tables

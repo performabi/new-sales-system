@@ -1,12 +1,9 @@
-// src/lib/supabaseClient.ts
-// Browser-safe Supabase client using the ANON key (RLS-aware)
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-let client: SupabaseClient | null = null;
+let publicClient: SupabaseClient | null = null;
+const schemaClients: Record<string, SupabaseClient> = {};
 
-export function getSupabaseClient(): SupabaseClient {
-  if (client) return client;
-
+export function getSupabaseClient(schema?: string): SupabaseClient {
   const url = import.meta.env.VITE_SUPABASE_URL ?? '';
   const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY ?? '';
 
@@ -16,6 +13,16 @@ export function getSupabaseClient(): SupabaseClient {
     );
   }
 
-  client = createClient(url, anonKey);
-  return client;
+  if (!schema) {
+    if (publicClient) return publicClient;
+    publicClient = createClient(url, anonKey);
+    return publicClient;
+  }
+
+  if (schemaClients[schema]) return schemaClients[schema];
+
+  schemaClients[schema] = createClient(url, anonKey, {
+    db: { schema },
+  });
+  return schemaClients[schema];
 }

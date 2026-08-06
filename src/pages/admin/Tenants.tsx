@@ -37,7 +37,7 @@ export default function AdminTenants() {
         </div>
         {userType === 'super_admin' && (
           <button className="btn btn-primary" onClick={() => navigate('/admin/tenants/provision')}>
-            + Provision New
+            + Register New Customer
           </button>
         )}
       </div>
@@ -64,7 +64,13 @@ export default function AdminTenants() {
             </thead>
             <tbody>
               {tenants.map((t) => (
-                <tr key={t.tenant_id}>
+                <tr
+                  key={t.tenant_id}
+                  onClick={() => navigate(`/admin/tenants/${t.tenant_id}`)}
+                  style={{ cursor: 'pointer' }}
+                  onMouseEnter={(e) => e.currentTarget.style.background = 'var(--primary-light)'}
+                  onMouseLeave={(e) => e.currentTarget.style.background = 'transparent'}
+                >
                   <td style={{ fontWeight: 600 }}>{t.name}</td>
                   <td style={{ fontFamily: 'monospace', fontSize: '0.85rem', color: 'var(--text-muted)' }}>{t.slug}</td>
                   <td>{t.plan_name || '—'}</td>

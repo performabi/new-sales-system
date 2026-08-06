@@ -14,7 +14,8 @@ function getSupabaseAdmin(schema?: string) {
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   let supabaseAdmin;
   try {
-    supabaseAdmin = getSupabaseAdmin();
+    const schema = (req.query.tenant_schema as string) || (req.body?.tenant_schema as string);
+    supabaseAdmin = getSupabaseAdmin(schema);
   } catch (e) {
     return res.status(500).json({ error: (e as Error).message });
   }

@@ -3,6 +3,8 @@ import express from 'express';
 import { createClient } from '@supabase/supabase-js';
 import crypto from 'crypto';
 
+let currentSchema: string | undefined;
+
 function getSupabaseAdmin(server: any, schema?: string) {
   const env = loadEnv(server.config.mode, process.cwd(), '');
   const supabaseUrl = env.VITE_SUPABASE_URL || '';
@@ -14,6 +16,7 @@ function getSupabaseAdmin(server: any, schema?: string) {
     auth: { autoRefreshToken: false, persistSession: false },
   };
   if (schema) opts.db = { schema };
+  else if (currentSchema) opts.db = { schema: currentSchema };
   return createClient(supabaseUrl, serviceRole, opts);
 }
 
@@ -23,15 +26,22 @@ export function apiPlugin(): Plugin {
     configureServer(server) {
       const app = express();
       app.use(express.json());
+      app.use((req, _, next) => {
+        currentSchema = (req.query?.tenant_schema as string) || req.body?.tenant_schema;
+        next();
+      });
 
       // ---- Users: create ----
       app.post('/api/users/create', async (req, res) => {
         try {
-          const { email, password, username, full_name, role, pin, assigned_store_id, created_by } = req.body;
+          const { email, password, username, full_name, role, pin, assigned_store_id, created_by, tenant_schema } = req.body;
           if (!/^\d{4,8}$/.test(String(pin || ''))) {
             return res.status(400).json({ error: 'PIN must be 4-8 digits' });
           }
-          const supabaseAdmin = getSupabaseAdmin(server);
+          if (!tenant_schema) {
+            return res.status(400).json({ error: 'tenant_schema is required' });
+          }
+          const supabaseAdmin = getSupabaseAdmin(server, tenant_schema);
 
           const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
             email,
@@ -76,11 +86,14 @@ export function apiPlugin(): Plugin {
       app.put('/api/users/:id', async (req, res) => {
         try {
           const { id } = req.params;
-          const { email, password, username, full_name, role, is_active, assigned_store_id, pin } = req.body;
+          const { email, password, username, full_name, role, is_active, assigned_store_id, pin, tenant_schema } = req.body;
           if (pin && !/^\d{4,8}$/.test(String(pin))) {
             return res.status(400).json({ error: 'PIN must be 4-8 digits' });
           }
-          const supabaseAdmin = getSupabaseAdmin(server);
+          if (!tenant_schema) {
+            return res.status(400).json({ error: 'tenant_schema is required' });
+          }
+          const supabaseAdmin = getSupabaseAdmin(server, tenant_schema);
 
           const authUpdates: any = {};
           if (email) authUpdates.email = email;
@@ -112,9 +125,13 @@ export function apiPlugin(): Plugin {
       });
 
       // ---- Users: fetch all (with store name) ----
-      app.get('/api/users', async (_req, res) => {
+      app.get('/api/users', async (req, res) => {
         try {
-          const supabaseAdmin = getSupabaseAdmin(server);
+          const tenant_schema = req.query.tenant_schema as string;
+          if (!tenant_schema) {
+            return res.status(400).json({ error: 'tenant_schema query param required' });
+          }
+          const supabaseAdmin = getSupabaseAdmin(server, tenant_schema);
           const { data, error } = await supabaseAdmin
             .from('users')
             .select('*, stores!users_assigned_store_id_fkey(name)')
@@ -149,11 +166,17 @@ export function apiPlugin(): Plugin {
       app.put('/api/users/:id/reset-password', async (req, res) => {
         try {
           const { id } = req.params;
-          const { newPassword } = req.body;
+          const { newPassword, tenant_schema } = req.body;
           const supabaseAdmin = getSupabaseAdmin(server);
           const password = newPassword || 'Sales12345';
           const { error } = await supabaseAdmin.auth.admin.updateUserById(id, { password });
           if (error) return res.status(400).json({ error: error.message });
+
+          if (tenant_schema) {
+            const tenantAdmin = getSupabaseAdmin(server, tenant_schema);
+            await tenantAdmin.from('users').update({ requires_password_change: true }).eq('user_id', id);
+          }
+
           return res.json({ success: true });
         } catch (err) {
           console.error('Server error resetting password:', err);

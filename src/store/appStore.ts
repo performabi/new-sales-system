@@ -4,6 +4,26 @@ import type { Store, UserProfile, InventoryItem, Toast, PluCategory, Plu, Suppli
 import { getSupabaseClient } from '../lib/supabaseClient';
 import { useAuthStore } from './authStore';
 
+function getClient() {
+  const auth = useAuthStore.getState();
+  const schema = auth.user?.user_metadata?.tenant_schema as string | undefined;
+  return getSupabaseClient(schema);
+}
+
+function apiFetch(path: string, options?: RequestInit) {
+  const auth = useAuthStore.getState();
+  const schema = auth.user?.user_metadata?.tenant_schema as string | undefined;
+  const separator = path.includes('?') ? '&' : '?';
+  const url = schema ? `${path}${separator}tenant_schema=${encodeURIComponent(schema)}` : path;
+  return fetch(url, options);
+}
+
+function getSchemaParam(): string {
+  const auth = useAuthStore.getState();
+  const schema = auth.user?.user_metadata?.tenant_schema as string | undefined;
+  return schema ? `tenant_schema=${encodeURIComponent(schema)}` : '';
+}
+
 export interface LogEntry {
   id: string;
   timestamp: string;       // ISO
@@ -205,7 +225,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   fetchStores: async () => {
     set({ storesLoading: true });
     try {
-      const supabase = getSupabaseClient();
+      const supabase = getClient();
       const { data, error } = await supabase
         .from('stores')
         .select('*')
@@ -222,7 +242,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   addStore: async (store) => {
     try {
-      const supabase = getSupabaseClient();
+      const supabase = getClient();
       const userId = useAuthStore.getState().profile?.user_id || null;
 
       // Calculate next sequential 3-digit store number (e.g. "001", "002"...)
@@ -275,7 +295,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   updateStore: async (id, data) => {
     try {
-      const supabase = getSupabaseClient();
+      const supabase = getClient();
       // Capture old values before update for logging
       const oldStore = get().stores.find((s) => s.store_id === id);
       const { error } = await supabase
@@ -314,7 +334,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   deleteStore: async (id) => {
     try {
-      const supabase = getSupabaseClient();
+      const supabase = getClient();
       const deletedStore = get().stores.find((s) => s.store_id === id);
       const { error } = await supabase
         .from('stores')
@@ -347,7 +367,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   fetchUsers: async () => {
     set({ usersLoading: true });
     try {
-      const supabase = getSupabaseClient();
+      const supabase = getClient();
       const { data, error } = await supabase
         .from('users')
         .select('*, stores!users_assigned_store_id_fkey(name)')
@@ -369,15 +389,15 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   addUser: async (userData) => {
     try {
-      const createdById = useAuthStore.getState().profile?.user_id || null;
-      // Use our custom Vite API route which uses the service_role key
-      // This bypasses the "Allow new users to sign up" toggle in Supabase
-      const response = await fetch('/api/users/create', {
+      const auth = useAuthStore.getState();
+      const createdById = auth.profile?.user_id || null;
+      const tenantSchema = auth.user?.user_metadata?.tenant_schema as string;
+      const response = await apiFetch('/api/users/create', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ ...userData, created_by: createdById }),
+        body: JSON.stringify({ ...userData, created_by: createdById, tenant_schema: tenantSchema }),
       });
 
       const result = await response.json();
@@ -415,12 +435,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   updateUser: async (id, data) => {
     try {
       const oldUser = get().users.find((u) => u.user_id === id);
-      const response = await fetch(`/api/users/${id}`, {
+      const tenantSchema = useAuthStore.getState().user?.user_metadata?.tenant_schema as string;
+      const response = await apiFetch(`/api/users/${id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify(data),
+        body: JSON.stringify({ ...data, tenant_schema: tenantSchema }),
       });
 
       const result = await response.json();
@@ -465,7 +486,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   deleteUser: async (id) => {
     try {
       const deletedUser = get().users.find((u) => u.user_id === id);
-      const response = await fetch(`/api/users/${id}`, {
+      const response = await apiFetch(`/api/users/${id}`, {
         method: 'DELETE',
       });
       const result = await response.json();
@@ -494,10 +515,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   resetUserPassword: async (id, newPassword?: string) => {
     try {
       const targetUser = get().users.find((u) => u.user_id === id);
-      const response = await fetch(`/api/users/${id}/reset-password`, {
+      const tenantSchema = useAuthStore.getState().user?.user_metadata?.tenant_schema as string;
+      const response = await apiFetch(`/api/users/${id}/reset-password`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ newPassword: newPassword || null }),
+        body: JSON.stringify({ newPassword: newPassword || null, tenant_schema: tenantSchema }),
       });
       const result = await response.json();
       if (!response.ok) {
@@ -530,7 +552,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   fetchInventory: async () => {
     set({ inventoryLoading: true });
     try {
-      const supabase = getSupabaseClient();
+      const supabase = getClient();
       const { data, error } = await supabase
         .from('inventory')
         .select('*, stores(name)')
@@ -557,7 +579,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   fetchPluCategories: async () => {
     set({ pluCategoriesLoading: true });
     try {
-      const supabase = getSupabaseClient();
+      const supabase = getClient();
       const { data, error } = await supabase
         .from('plu_categories')
         .select('*')
@@ -591,7 +613,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const profile = useAuthStore.getState().profile;
       const userId = profile?.user_id || null;
-      const response = await fetch('/api/plu_categories/create', {
+      const response = await apiFetch('/api/plu_categories/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, created_by: userId }),
@@ -620,7 +642,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   updatePluCategory: async (id, name) => {
     try {
       const oldCat = get().pluCategories.find((c) => c.category_id === id);
-      const response = await fetch(`/api/plu_categories/${id}`, {
+      const response = await apiFetch(`/api/plu_categories/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name }),
@@ -651,7 +673,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   deletePluCategory: async (id) => {
     try {
       const deletedCat = get().pluCategories.find((c) => c.category_id === id);
-      const response = await fetch(`/api/plu_categories/${id}`, {
+      const response = await apiFetch(`/api/plu_categories/${id}`, {
         method: 'DELETE',
       });
       const result = await response.json();
@@ -685,7 +707,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   fetchPlus: async () => {
     set({ plusLoading: true });
     try {
-      const supabase = getSupabaseClient();
+      const supabase = getClient();
       const { data, error } = await supabase
         .from('plu')
         .select('*, plu_categories(name)')
@@ -709,7 +731,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const userId = useAuthStore.getState().profile?.user_id || null;
 
-      const response = await fetch('/api/plu/create', {
+      const response = await apiFetch('/api/plu/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...data, created_by: userId }),
@@ -748,7 +770,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const username = useAuthStore.getState().profile?.username ?? 'system';
       const payload = { ...data, username };
-      const response = await fetch(`/api/plu/${id}`, {
+      const response = await apiFetch(`/api/plu/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -769,7 +791,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   deletePlu: async (id) => {
     try {
       const deletedPlu = get().plusItems.find((p) => p.plu_id === id);
-      const response = await fetch(`/api/plu/${id}`, {
+      const response = await apiFetch(`/api/plu/${id}`, {
         method: 'DELETE',
       });
       const result = await response.json();
@@ -798,7 +820,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   getNextPluNumber: async () => {
     try {
-      const supabase = getSupabaseClient();
+      const supabase = getClient();
       const { data } = await supabase
         .from('plu')
         .select('plu_number')
@@ -831,7 +853,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   fetchLogbook: async () => {
     set({ logbookLoading: true });
     try {
-      const res = await fetch('/api/logbook');
+      const res = await apiFetch('/api/logbook');
       if (!res.ok) { console.error('Failed to fetch logbook', res.status); return; }
       const rows = await res.json();
       type LogbookRow = { id: string; timestamp: string; entity: string; entity_label: string; field: string; old_value: string | null; new_value: string | null; username: string; action?: string | null };
@@ -873,7 +895,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     set((s) => ({ logEntries: [newEntry, ...s.logEntries] }));
     // Persist to Supabase via server endpoint (fire and forget)
     try {
-      await fetch('/api/logbook/create', {
+      await apiFetch('/api/logbook/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ...entry, username }),
@@ -912,7 +934,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ---------- PLU Scheduled Changes ----------
   schedulePluChange: async (pluId, payload, scheduledAt, createdBy) => {
     try {
-      const res = await fetch('/api/plu_scheduled_changes', {
+      const res = await apiFetch('/api/plu_scheduled_changes', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ plu_id: pluId, payload, scheduled_at: scheduledAt, created_by: createdBy }),
@@ -927,7 +949,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   applyDueScheduledChanges: async () => {
     try {
-      const res = await fetch('/api/plu_scheduled_changes/due');
+      const res = await apiFetch('/api/plu_scheduled_changes/due');
       if (!res.ok) return;
       const due = await res.json() as { id: string; plu_id: string; payload: Record<string, unknown> }[];
       if (!due.length) return;
@@ -935,7 +957,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const { error } = await get().updatePlu(sc.plu_id, sc.payload);
         if (!error) {
           // Mark applied
-          await fetch(`/api/plu_scheduled_changes/${sc.id}/applied`, { method: 'PUT' });
+          await apiFetch(`/api/plu_scheduled_changes/${sc.id}/applied`, { method: 'PUT' });
           get().addToast('success', `Scheduled PLU change applied ✔`);
         }
       }
@@ -951,7 +973,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   fetchSuppliers: async () => {
     set({ suppliersLoading: true });
     try {
-      const res = await fetch('/api/suppliers');
+      const res = await apiFetch('/api/suppliers');
       if (!res.ok) throw new Error('Failed to load suppliers');
       const data = await res.json();
       set({ suppliers: data });
@@ -967,7 +989,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const username = useAuthStore.getState().profile?.username ?? 'system';
       const payload = { ...data, username };
-      const res = await fetch('/api/suppliers/create', {
+      const res = await apiFetch('/api/suppliers/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -986,7 +1008,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const username = useAuthStore.getState().profile?.username ?? 'system';
       const payload = { ...data, username };
-      const res = await fetch(`/api/suppliers/${id}`, {
+      const res = await apiFetch(`/api/suppliers/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -1008,7 +1030,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   fetchItemSizing: async () => {
     set({ itemSizingLoading: true });
     try {
-      const res = await fetch('/api/item-sizing');
+      const res = await apiFetch('/api/item-sizing');
       if (!res.ok) throw new Error('Failed to load item sizing');
       const data = await res.json();
       set({ itemSizing: data });
@@ -1022,7 +1044,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   createItemSizing: async (sizingData) => {
     try {
-      const res = await fetch('/api/item-sizing/create', {
+      const res = await apiFetch('/api/item-sizing/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(sizingData),
@@ -1056,7 +1078,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   updateItemSizing: async (id, sizingData) => {
     try {
       const old = get().itemSizing.find((s) => s.id === id);
-      const res = await fetch(`/api/item-sizing/${id}`, {
+      const res = await apiFetch(`/api/item-sizing/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(sizingData),
@@ -1089,7 +1111,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   deleteItemSizing: async (id) => {
     try {
       const deleted = get().itemSizing.find((s) => s.id === id);
-      const res = await fetch(`/api/item-sizing/${id}`, {
+      const res = await apiFetch(`/api/item-sizing/${id}`, {
         method: 'DELETE',
       });
       const result = await res.json();
@@ -1119,7 +1141,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   fetchPurchaseOrders: async () => {
     set({ purchaseOrdersLoading: true });
     try {
-      const res = await fetch('/api/purchase-orders');
+      const res = await apiFetch('/api/purchase-orders');
       if (!res.ok) throw new Error('Failed to load purchase orders');
       const data = await res.json();
       set({ purchaseOrders: data });
@@ -1133,7 +1155,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   savePoDraft: async (data) => {
     try {
-      const res = await fetch('/api/purchase-orders/save-draft', {
+      const res = await apiFetch('/api/purchase-orders/save-draft', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -1150,7 +1172,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   lockPurchaseOrder: async (id) => {
     try {
-      const res = await fetch(`/api/purchase-orders/${id}/lock`, {
+      const res = await apiFetch(`/api/purchase-orders/${id}/lock`, {
         method: 'PUT',
       });
       const result = await res.json();
@@ -1170,7 +1192,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   fetchPoSuggestions: async (storeId) => {
     set({ poSuggestionsLoading: true, poSuggestions: [] });
     try {
-      const res = await fetch('/api/purchase-orders/suggestions', {
+      const res = await apiFetch('/api/purchase-orders/suggestions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ store_id: storeId }),
@@ -1197,7 +1219,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   fetchSupplierProducts: async (supplierId) => {
     set({ supplierProductsLoading: true });
     try {
-      const res = await fetch(`/api/supplier-products?supplier_id=${encodeURIComponent(supplierId)}`);
+      const res = await apiFetch(`/api/supplier-products?supplier_id=${encodeURIComponent(supplierId)}`);
       if (!res.ok) throw new Error('Failed to load supplier products');
       const data = await res.json();
       set({ supplierProducts: data });
@@ -1211,7 +1233,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   linkSupplierProduct: async (data) => {
     try {
-      const res = await fetch('/api/supplier-products/link', {
+      const res = await apiFetch('/api/supplier-products/link', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -1227,7 +1249,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   unlinkSupplierProduct: async (id) => {
     try {
-      const res = await fetch(`/api/supplier-products/${id}`, {
+      const res = await apiFetch(`/api/supplier-products/${id}`, {
         method: 'DELETE',
       });
       const result = await res.json();
@@ -1246,7 +1268,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   fetchClockStatus: async (userId) => {
     set({ clockStatusLoading: true });
     try {
-      const res = await fetch(`/api/pos/clock-status?user_id=${encodeURIComponent(userId)}`);
+      const res = await apiFetch(`/api/pos/clock-status?user_id=${encodeURIComponent(userId)}`);
       if (!res.ok) throw new Error('Failed to fetch clock status');
       const data = await res.json();
       set({ clockStatus: data });
@@ -1259,7 +1281,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   clockIn: async (storeId, userId) => {
     try {
-      const res = await fetch('/api/pos/clock-in', {
+      const res = await apiFetch('/api/pos/clock-in', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ store_id: storeId, user_id: userId }),
@@ -1275,7 +1297,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   clockOut: async (userId) => {
     try {
-      const res = await fetch('/api/pos/clock-out', {
+      const res = await apiFetch('/api/pos/clock-out', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: userId }),
@@ -1298,7 +1320,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       let url = `/api/checklists?store_id=${encodeURIComponent(storeId)}`;
       if (type) url += `&type=${encodeURIComponent(type)}`;
-      const res = await fetch(url);
+      const res = await fetch(url.startsWith('/api/') ? url + (url.includes('?') ? '&' : '?') + getSchemaParam() : url);
       if (!res.ok) throw new Error('Failed to fetch checklists');
       const data = await res.json();
       set({ checklists: data });
@@ -1312,7 +1334,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   // ---------- Checklists (HO) ----------
   addChecklistTask: async (data) => {
     try {
-      const res = await fetch('/api/checklists/create', {
+      const res = await apiFetch('/api/checklists/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -1328,7 +1350,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   updateChecklistTask: async (id, data) => {
     try {
-      const res = await fetch(`/api/checklists/${id}`, {
+      const res = await apiFetch(`/api/checklists/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -1344,7 +1366,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   deleteChecklistTask: async (id) => {
     try {
-      const res = await fetch(`/api/checklists/${id}`, {
+      const res = await apiFetch(`/api/checklists/${id}`, {
         method: 'DELETE',
       });
       const result = await res.json();
@@ -1363,7 +1385,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   fetchPendingPOs: async (storeId) => {
     set({ pendingPOsLoading: true });
     try {
-      const res = await fetch(`/api/purchase-orders/pending?store_id=${encodeURIComponent(storeId)}`);
+      const res = await apiFetch(`/api/purchase-orders/pending?store_id=${encodeURIComponent(storeId)}`);
       if (!res.ok) throw new Error('Failed to fetch pending POs');
       const data = await res.json();
       set({ pendingPOs: data });
@@ -1377,7 +1399,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   receiveDelivery: async (poId, items) => {
     try {
-      const res = await fetch('/api/purchase-orders/receive', {
+      const res = await apiFetch('/api/purchase-orders/receive', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ po_id: poId, items }),
@@ -1396,7 +1418,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   fetchCurrencyConfig: async () => {
     try {
-      const res = await fetch('/api/settings/currency');
+      const res = await apiFetch('/api/settings/currency');
       if (!res.ok) return;
       const data = await res.json();
       set({ currencyConfig: data });
@@ -1407,7 +1429,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   updateCurrencyConfig: async (config) => {
     try {
-      const res = await fetch('/api/settings/currency', {
+      const res = await apiFetch('/api/settings/currency', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(config),
@@ -1427,7 +1449,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   fetchLoyaltyCards: async () => {
     set({ loyaltyCardsLoading: true });
     try {
-      const res = await fetch('/api/loyalty-cards');
+      const res = await apiFetch('/api/loyalty-cards');
       if (!res.ok) throw new Error('Failed to fetch loyalty cards');
       const data = await res.json();
       set({ loyaltyCards: data });
@@ -1440,7 +1462,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   createLoyaltyCard: async (data) => {
     try {
-      const res = await fetch('/api/loyalty-cards/create', {
+      const res = await apiFetch('/api/loyalty-cards/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -1457,7 +1479,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   updateLoyaltyCard: async (id, data) => {
     try {
-      const res = await fetch(`/api/loyalty-cards/${id}`, {
+      const res = await apiFetch(`/api/loyalty-cards/${id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -1475,7 +1497,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   lookupLoyaltyCard: async (code) => {
     try {
-      const res = await fetch(`/api/loyalty-cards/lookup/${encodeURIComponent(code)}`);
+      const res = await apiFetch(`/api/loyalty-cards/lookup/${encodeURIComponent(code)}`);
       if (!res.ok) return null;
       return await res.json();
     } catch (err) {
@@ -1489,7 +1511,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   fetchCashbackPercent: async () => {
     try {
-      const res = await fetch('/api/settings/loyalty-cashback-percent');
+      const res = await apiFetch('/api/settings/loyalty-cashback-percent');
       if (res.ok) {
         const data = await res.json();
         set({ cashbackPercent: data.percent });
@@ -1501,7 +1523,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   updateCashbackPercent: async (percent) => {
     try {
-      await fetch('/api/settings/loyalty-cashback-percent', {
+      await apiFetch('/api/settings/loyalty-cashback-percent', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ percent }),
@@ -1521,7 +1543,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   fetchLoyaltyNotifications: async () => {
     set({ loyaltyNotificationsLoading: true });
     try {
-      const res = await fetch('/api/loyalty-notifications');
+      const res = await apiFetch('/api/loyalty-notifications');
       if (res.ok) {
         const data = await res.json();
         set({ loyaltyNotifications: data });
@@ -1535,7 +1557,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   createNotification: async (data) => {
     try {
-      const res = await fetch('/api/loyalty-notifications/create', {
+      const res = await apiFetch('/api/loyalty-notifications/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(data),
@@ -1553,7 +1575,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   sendNotification: async (id) => {
     try {
-      const res = await fetch(`/api/loyalty-notifications/${id}/send`, { method: 'POST' });
+      const res = await apiFetch(`/api/loyalty-notifications/${id}/send`, { method: 'POST' });
       if (!res.ok) {
         const err = await res.json();
         return { error: err.error || 'Failed to send notification' };
@@ -1567,7 +1589,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   fetchUnseenNotifications: async (storeId) => {
     try {
-      const res = await fetch(`/api/loyalty-notifications/unseen?store_id=${encodeURIComponent(storeId)}`);
+      const res = await apiFetch(`/api/loyalty-notifications/unseen?store_id=${encodeURIComponent(storeId)}`);
       if (res.ok) {
         const data = await res.json();
         set({ unseenNotifications: data });
@@ -1662,7 +1684,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       let url = `/api/sales?store_id=${storeId}`;
       if (date) url += `&date=${date}`;
-      const res = await fetch(url);
+      const res = await fetch(url + '&' + getSchemaParam());
       if (res.ok) {
         const data = await res.json();
         set({ saleTransactions: data });
@@ -1674,7 +1696,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   createSale: async (payload) => {
     try {
-      const res = await fetch('/api/sales/create', {
+      const res = await apiFetch('/api/sales/create', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -1690,7 +1712,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   voidSale: async (transactionId) => {
     try {
-      const res = await fetch('/api/sales/void', {
+      const res = await apiFetch('/api/sales/void', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ transaction_id: transactionId }),

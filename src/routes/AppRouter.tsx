@@ -16,6 +16,7 @@ import AdminTenantProvision from '../pages/admin/TenantProvision';
 import AdminSuperUsers from '../pages/admin/SuperUsers';
 import AdminPlans from '../pages/admin/Plans';
 import AdminSettings from '../pages/admin/Settings';
+import AdminTenantDetail from '../pages/admin/TenantDetail';
 
 import Dashboard from '../pages/app/Dashboard';
 import Stores from '../pages/app/Stores';
@@ -132,6 +133,7 @@ export default function AppRouter() {
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<AdminDashboard />} />
           <Route path="tenants" element={<AdminTenants />} />
+          <Route path="tenants/:tenantId" element={<AdminTenantDetail />} />
           <Route
             path="tenants/provision"
             element={

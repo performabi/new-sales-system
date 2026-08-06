@@ -2,7 +2,6 @@ import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import crypto from 'crypto';
 
-// Expect these env vars to be set in Vercel dashboard
 const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
 const serviceRole = process.env.SERVICE_ROLE || '';
 
@@ -21,6 +20,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     pin,
     assigned_store_id,
     created_by,
+    tenant_schema,
   } = req.body as {
     email: string;
     password: string;
@@ -30,9 +30,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     pin: string;
     assigned_store_id?: string | null;
     created_by?: string | null;
+    tenant_schema?: string;
   };
 
-  // Basic validation
   if (!email || !password || !username || !full_name || !role || !pin) {
     res.status(400).json({ error: 'Missing required fields' });
     return;
@@ -41,7 +41,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     res.status(400).json({ error: 'PIN must be 4-8 digits' });
     return;
   }
-
+  if (!tenant_schema) {
+    res.status(400).json({ error: 'tenant_schema is required' });
+    return;
+  }
   if (!supabaseUrl || !serviceRole) {
     res.status(500).json({ error: 'Missing Supabase admin credentials' });
     return;
@@ -49,9 +52,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const supabaseAdmin = createClient(supabaseUrl, serviceRole, {
     auth: { autoRefreshToken: false, persistSession: false },
+    db: { schema: tenant_schema },
   });
 
-  // Create auth user (bypass sign‑up restriction)
   const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
     email,
     password,
@@ -66,10 +69,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  // Hash the PIN before storing
   const pinHash = crypto.createHash('sha256').update(pin).digest('hex');
 
-  // Insert profile into public "users" table
   const { error: profileError } = await supabaseAdmin.from('users').insert({
     user_id: authData.user.id,
     email,
@@ -83,7 +84,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   });
 
   if (profileError) {
-    // Roll back auth user creation on profile failure
     await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
     res.status(400).json({ error: profileError.message });
     return;

@@ -14,8 +14,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'Missing Supabase admin credentials on server.' });
   }
 
+  const tenant_schema = (req.body?.tenant_schema as string) || req.query.tenant_schema as string;
+
   const supabaseAdmin = createClient(supabaseUrl, serviceRole, {
     auth: { autoRefreshToken: false, persistSession: false },
+    ...(tenant_schema ? { db: { schema: tenant_schema } } : {}),
   });
 
   // PUT /api/users/[id]/reset-password
@@ -27,11 +30,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(id, { password });
       if (authError) return res.status(400).json({ error: authError.message });
 
-      const { error: profileError } = await supabaseAdmin
-        .from('users')
-        .update({ requires_password_change: true })
-        .eq('user_id', id);
-      if (profileError) return res.status(400).json({ error: profileError.message });
+      if (tenant_schema) {
+        const { error: profileError } = await supabaseAdmin
+          .from('users')
+          .update({ requires_password_change: true })
+          .eq('user_id', id);
+        if (profileError) return res.status(400).json({ error: profileError.message });
+      }
 
       return res.json({ success: true, passwordSet: !!newPassword });
     } catch (err) {
