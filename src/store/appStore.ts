@@ -370,7 +370,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const supabase = getClient();
       const { data, error } = await supabase
         .from('users')
-        .select('*, stores!users_assigned_store_id_fkey(name)')
+        .select('*, stores!assigned_store_id(name)')
         .order('full_name');
       if (error) throw error;
       const mapped = (data ?? []).map((u: any) => ({

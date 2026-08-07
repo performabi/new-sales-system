@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useParams, useLocation } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 
 import AppLayout from '../components/Layout/AppLayout';
@@ -111,6 +111,74 @@ function AdminOnlyRoute({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+async function fetchTenantSlug(): Promise<string | null> {
+  const schema = useAuthStore.getState().user?.user_metadata?.tenant_schema as string | undefined;
+  if (!schema) return null;
+  try {
+    const res = await fetch(`/api/app/tenant-info?tenant_schema=${encodeURIComponent(schema)}`);
+    if (!res.ok) return null;
+    const tenant = await res.json();
+    return tenant.slug as string;
+  } catch {
+    return null;
+  }
+}
+
+function TenantPortal() {
+  const { slug } = useParams();
+  const location = useLocation();
+  const { profile } = useAuthStore();
+  const [tenantSlug, setTenantSlug] = useState<string | null>(null);
+
+  if (profile?.role === 'user') return <Navigate to="/pos/dashboard" replace />;
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchTenantSlug().then((s) => {
+      if (!cancelled) setTenantSlug(s);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (tenantSlug && tenantSlug !== slug) {
+    const rest = location.pathname.replace(new RegExp(`^/app/${slug}`), '');
+    return <Navigate to={`/app/${tenantSlug}${rest || '/dashboard'}`} replace />;
+  }
+
+  return <AppLayout />;
+}
+
+function LegacyAppRedirect() {
+  const location = useLocation();
+  const [slug, setSlug] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchTenantSlug().then((s) => {
+      if (!cancelled) {
+        if (s) setSlug(s);
+        else setFailed(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (failed) return <Navigate to="/" replace />;
+  if (!slug) return <LoadingSpinner />;
+  const rest = location.pathname.slice(4) || '/dashboard';
+  return <Navigate to={`/app/${slug}${rest}`} replace />;
+}
+
+function AppCatchAll() {
+  const { slug } = useParams();
+  return <Navigate to={`/app/${slug}/dashboard`} replace />;
+}
+
 export default function AppRouter() {
   const initialize = useAuthStore((s) => s.initialize);
 
@@ -151,10 +219,10 @@ export default function AppRouter() {
         </Route>
 
         <Route
-          path="/app"
+          path="/app/:slug"
           element={
             <ProtectedRoute>
-              <AppLayout />
+              <TenantPortal />
             </ProtectedRoute>
           }
         >
@@ -176,7 +244,17 @@ export default function AppRouter() {
           <Route path="loyalty-cards" element={<LoyaltyCards />} />
           <Route path="loyalty-notifications" element={<LoyaltyNotifications />} />
           <Route path="help/faq" element={<Faq />} />
+          <Route path="*" element={<AppCatchAll />} />
         </Route>
+
+        <Route
+          path="/app/*"
+          element={
+            <ProtectedRoute>
+              <LegacyAppRedirect />
+            </ProtectedRoute>
+          }
+        />
 
         <Route path="/pos/access" element={<AdminStoreSelect />} />
         <Route path="/pos/select-store" element={<PosStoreSelect />} />

@@ -38,7 +38,6 @@ export default function AdminTenantDetail() {
 
   // Tenant edit form
   const [tName, setTName] = useState('');
-  const [tSlug, setTSlug] = useState('');
   const [tDomain, setTDomain] = useState('');
   const [tPlanId, setTPlanId] = useState('');
   const [tIsActive, setTIsActive] = useState(true);
@@ -79,7 +78,6 @@ export default function AdminTenantDetail() {
           setTenant(found);
           if (found) {
             setTName(found.name);
-            setTSlug(found.slug);
             setTDomain(found.domain || '');
             setTPlanId(found.plan_id || '');
             setTIsActive(found.is_active);
@@ -126,12 +124,18 @@ export default function AdminTenantDetail() {
       const res = await fetch(`/api/admin/tenants/${tenant.tenant_id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: tName, slug: tSlug, domain: tDomain, plan_id: tPlanId, is_active: tIsActive }),
+        body: JSON.stringify({
+          name: tName,
+          ...(autoSlug ? { slug: autoSlug } : {}),
+          domain: tDomain,
+          plan_id: tPlanId,
+          is_active: tIsActive,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || 'Failed to save');
       setTenantMsg(data.warning || 'Tenant updated');
-      setTenant({ ...tenant, name: tName, slug: tSlug, domain: tDomain, plan_id: tPlanId, is_active: tIsActive });
+      setTenant({ ...tenant, name: tName, ...(autoSlug ? { slug: autoSlug } : {}), domain: tDomain, plan_id: tPlanId, is_active: tIsActive });
     } catch (e) {
       setTenantMsg(`Error: ${(e as Error).message}`);
     } finally {
@@ -156,7 +160,14 @@ export default function AdminTenantDetail() {
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to save');
+      if (!res.ok) {
+        if (res.status === 409 && data.error === 'EMAIL_EXISTS' && data.existingUser) {
+          setReassignUser(data.existingUser);
+          setShowReassignModal(true);
+          return;
+        }
+        throw new Error(data.error || 'Failed to save');
+      }
       setMuMsg((data.warning ? `${data.warning} ` : '') + 'Main user updated');
       setMainUser({ ...mainUser, full_name: muFullName, username: muUsername, email: muEmail, is_active: muIsActive });
     } catch (e) {
@@ -164,6 +175,53 @@ export default function AdminTenantDetail() {
     } finally {
       setMuSaving(false);
     }
+  };
+
+  const [showReassignModal, setShowReassignModal] = useState(false);
+  const [reassignUser, setReassignUser] = useState<{
+    id: string;
+    email: string;
+    full_name: string;
+    tenant_schema: string | null;
+    confirmed_at: string | null;
+    last_sign_in_at: string | null;
+  } | null>(null);
+
+  const confirmReassign = async () => {
+    if (!tenant || !reassignUser) return;
+    setMuSaving(true);
+    setMuMsg(null);
+    setShowReassignModal(false);
+    try {
+      const res = await fetch(`/api/admin/tenants/${tenant.tenant_id}/main-user/reassign`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ existing_user_id: reassignUser.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to reassign');
+      setMuMsg((data.warning ? `${data.warning} ` : '') + 'Main user reassigned');
+      // Refresh main user data
+      const refreshRes = await fetch(`/api/admin/tenants/${tenant.tenant_id}/main-user`);
+      if (refreshRes.ok) {
+        const user: MainUser = await refreshRes.json();
+        setMainUser(user);
+        setMuFullName(user.full_name);
+        setMuUsername(user.username);
+        setMuEmail(user.email);
+        setMuIsActive(user.is_active);
+      }
+    } catch (e) {
+      setMuMsg(`Error: ${(e as Error).message}`);
+    } finally {
+      setMuSaving(false);
+      setReassignUser(null);
+    }
+  };
+
+  const cancelReassign = () => {
+    setShowReassignModal(false);
+    setReassignUser(null);
   };
 
   const resendInvite = async () => {
@@ -247,6 +305,7 @@ export default function AdminTenantDetail() {
   }
 
   const confirmed = !!mainUser?.auth.confirmed_at;
+  const autoSlug = tName.toLowerCase().trim().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
   const initials = (mainUser?.full_name || mainUser?.email || '?')
     .split(' ')
     .filter(Boolean)
@@ -256,7 +315,8 @@ export default function AdminTenantDetail() {
     .toUpperCase();
 
   return (
-    <div style={{ maxWidth: '1100px' }}>
+    <>
+      <div style={{ maxWidth: '1100px' }}>
       <button
         className="btn btn-ghost"
         onClick={() => navigate('/admin/tenants')}
@@ -285,6 +345,17 @@ export default function AdminTenantDetail() {
             Schema <span style={{ fontFamily: 'monospace', color: 'var(--text-primary)' }}>{tenant.schema_name}</span>
           </span>
           <span>
+            Portal{' '}
+            <a
+              href={`${window.location.origin}/app/${tenant.slug}/dashboard`}
+              target="_blank"
+              rel="noopener noreferrer"
+              style={{ color: 'var(--primary)' }}
+            >
+              {window.location.origin}/app/{tenant.slug}/dashboard
+            </a>
+          </span>
+          <span>
             Created <span style={{ color: 'var(--text-primary)' }}>{new Date(tenant.created_at).toLocaleDateString()}</span>
           </span>
         </div>
@@ -295,29 +366,50 @@ export default function AdminTenantDetail() {
         <div className="card">
           <h2 style={{ fontSize: '1.2rem', marginBottom: '16px' }}>Company</h2>
 
-          <label className="form-label">Company name</label>
-          <input className="form-input" value={tName} onChange={(e) => setTName(e.target.value)} />
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '0 24px' }}>
+            <div>
+              <label className="form-label">Company name</label>
+              <input className="form-input" value={tName} onChange={(e) => setTName(e.target.value)} />
+            </div>
 
-          <label className="form-label">Slug</label>
-          <input
-            className="form-input"
-            value={tSlug}
-            onChange={(e) => setTSlug(e.target.value.toLowerCase())}
-            style={{ fontFamily: 'monospace' }}
-          />
+            <div>
+              <label className="form-label">Domain (optional)</label>
+              <input className="form-input" value={tDomain} onChange={(e) => setTDomain(e.target.value)} placeholder="example.com" />
+            </div>
 
-          <label className="form-label">Domain (optional)</label>
-          <input className="form-input" value={tDomain} onChange={(e) => setTDomain(e.target.value)} placeholder="example.com" />
+            <div>
+              <label className="form-label">Plan</label>
+              <select className="form-input" value={tPlanId} onChange={(e) => setTPlanId(e.target.value)}>
+                <option value="">No plan</option>
+                {plans.map((p) => (
+                  <option key={p.plan_id} value={p.plan_id}>
+                    {p.name}
+                  </option>
+                ))}
+              </select>
+            </div>
 
-          <label className="form-label">Plan</label>
-          <select className="form-input" value={tPlanId} onChange={(e) => setTPlanId(e.target.value)}>
-            <option value="">No plan</option>
-            {plans.map((p) => (
-              <option key={p.plan_id} value={p.plan_id}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+            <div>
+              <label className="form-label">Slug</label>
+              <div
+                style={{
+                  padding: '9px 12px',
+                  border: '1px solid var(--border-medium)',
+                  borderRadius: '8px',
+                  background: 'var(--bg-secondary, #f5f5f5)',
+                  fontFamily: 'monospace',
+                  fontSize: '0.9rem',
+                  color: 'var(--text-muted)',
+                  opacity: 0.9,
+                }}
+              >
+                {autoSlug || '—'}
+              </div>
+              <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '4px' }}>
+                Auto-generated from the company name.
+              </p>
+            </div>
+          </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '16px' }}>
             <input
@@ -351,11 +443,16 @@ export default function AdminTenantDetail() {
               <p style={{ color: 'var(--text-muted)', marginBottom: '20px' }}>
                 No main user found for this tenant. Invite one to grant them access.
               </p>
-              <label className="form-label">Full name</label>
-              <input className="form-input" value={inviteName} onChange={(e) => setInviteName(e.target.value)} />
-
-              <label className="form-label">Email</label>
-              <input className="form-input" type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} />
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '0 24px' }}>
+                <div>
+                  <label className="form-label">Full name</label>
+                  <input className="form-input" value={inviteName} onChange={(e) => setInviteName(e.target.value)} />
+                </div>
+                <div>
+                  <label className="form-label">Email</label>
+                  <input className="form-input" type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} />
+                </div>
+              </div>
 
               <div style={{ marginTop: '20px' }}>
                 <button className="btn btn-primary" onClick={inviteMainUser} disabled={inviting || !inviteEmail || !inviteName}>
@@ -414,28 +511,33 @@ export default function AdminTenantDetail() {
 
               <h3 style={{ fontSize: '0.95rem', marginBottom: '16px', color: 'var(--text-muted)' }}>Edit user</h3>
 
-              <label className="form-label">Full name</label>
-              <input className="form-input" value={muFullName} onChange={(e) => setMuFullName(e.target.value)} />
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '0 24px' }}>
+                <div>
+                  <label className="form-label">Full name</label>
+                  <input className="form-input" value={muFullName} onChange={(e) => setMuFullName(e.target.value)} />
+                </div>
 
-              <label className="form-label">Username</label>
-              <input className="form-input" value={muUsername} onChange={(e) => setMuUsername(e.target.value)} />
+                <div>
+                  <label className="form-label">Email</label>
+                  <input className="form-input" type="email" value={muEmail} onChange={(e) => setMuEmail(e.target.value)} />
+                </div>
 
-              <label className="form-label">Email</label>
-              <input className="form-input" type="email" value={muEmail} onChange={(e) => setMuEmail(e.target.value)} />
+                <div style={{ display: 'flex', alignItems: 'flex-end', paddingBottom: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <input
+                      type="checkbox"
+                      id="mu-active"
+                      checked={muIsActive}
+                      onChange={(e) => setMuIsActive(e.target.checked)}
+                      style={{ width: '16px', height: '16px' }}
+                    />
+                    <label htmlFor="mu-active" style={{ fontSize: '0.9rem' }}>User is active</label>
+                  </div>
+                </div>
+              </div>
               <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '4px' }}>
                 Changing the email sends a confirmation email to the new address before it takes effect.
               </p>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '16px' }}>
-                <input
-                  type="checkbox"
-                  id="mu-active"
-                  checked={muIsActive}
-                  onChange={(e) => setMuIsActive(e.target.checked)}
-                  style={{ width: '16px', height: '16px' }}
-                />
-                <label htmlFor="mu-active" style={{ fontSize: '0.9rem' }}>User is active</label>
-              </div>
 
               <div style={{ marginTop: '20px' }}>
                 <button className="btn btn-primary" onClick={saveMainUser} disabled={muSaving}>
@@ -448,7 +550,7 @@ export default function AdminTenantDetail() {
 
               <h3 style={{ fontSize: '0.95rem', marginBottom: '16px', color: 'var(--text-muted)' }}>Access</h3>
 
-              <button className="btn btn-ghost" onClick={resendInvite} disabled={resending} style={{ width: '100%' }}>
+              <button className="btn btn-primary" onClick={resendInvite} disabled={resending} style={{ width: '100%' }}>
                 {resending ? 'Sending…' : 'Send Access Email Again'}
               </button>
               <p style={{ color: 'var(--text-muted)', fontSize: '0.8rem', marginTop: '6px' }}>
@@ -481,5 +583,64 @@ export default function AdminTenantDetail() {
         </div>
       </div>
     </div>
+
+    {showReassignModal && reassignUser && (
+      <div
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          zIndex: 1000,
+          padding: '20px',
+        }}
+        onClick={cancelReassign}
+      >
+        <div
+          className="card"
+          style={{ maxWidth: '480px', width: '100%', padding: '24px' }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <h3 style={{ marginTop: 0, marginBottom: '16px' }}>Email Already Registered</h3>
+          <p style={{ color: 'var(--text-muted)', marginBottom: '16px' }}>
+            The email <strong>{reassignUser.email}</strong> is already associated with another user:
+          </p>
+          <div style={{ background: 'var(--bg-secondary)', padding: '16px', borderRadius: '8px', marginBottom: '16px' }}>
+            <div style={{ fontWeight: 600 }}>{reassignUser.full_name || '—'}</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.9rem' }}>{reassignUser.email}</div>
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '8px' }}>
+              {reassignUser.tenant_schema
+                ? `Currently main user for tenant: ${reassignUser.tenant_schema}`
+                : 'Not currently a main user for any tenant'}
+            </div>
+            <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '4px' }}>
+              Status: {reassignUser.confirmed_at ? 'Confirmed' : 'Pending invitation'}
+            </div>
+            {reassignUser.last_sign_in_at && (
+              <div style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '4px' }}>
+                Last sign in: {new Date(reassignUser.last_sign_in_at).toLocaleString()}
+              </div>
+            )}
+          </div>
+          <p style={{ color: 'var(--text-danger)', fontSize: '0.9rem', marginBottom: '20px' }}>
+            ⚠️ Making this user the main user will <strong>revoke access for the current main user</strong>.
+          </p>
+          <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+            <button className="btn btn-ghost" onClick={cancelReassign} disabled={muSaving}>
+              Cancel
+            </button>
+            <button className="btn btn-primary" onClick={confirmReassign} disabled={muSaving}>
+              {muSaving ? 'Reassigning…' : 'Make Main User'}
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   );
 }

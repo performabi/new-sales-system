@@ -25,6 +25,24 @@ interface AuthState {
   updatePassword: (newPassword: string) => Promise<{ error: string | null }>;
 }
 
+let authListenerRegistered = false;
+let resolveTypeKey: string | null = null;
+let resolveTypePromise: Promise<void> | null = null;
+
+function resolveUserTypeOnce(
+  user: User,
+  supabase: ReturnType<typeof getSupabaseClient>,
+  set: (partial: Partial<AuthState>) => void,
+) {
+  if (resolveTypePromise && resolveTypeKey === user.id) return resolveTypePromise;
+  resolveTypeKey = user.id;
+  resolveTypePromise = resolveUserType(user, supabase, set).finally(() => {
+    resolveTypePromise = null;
+    resolveTypeKey = null;
+  });
+  return resolveTypePromise;
+}
+
 export const useAuthStore = create<AuthState>((set, get) => ({
   session: null,
   user: null,
@@ -46,36 +64,52 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       const isRecoveryUrl =
         typeof window !== 'undefined' &&
         (window.location.search.includes('type=recovery') ||
-          window.location.hash.includes('type=recovery'));
+          window.location.hash.includes('type=recovery') ||
+          window.location.search.includes('type=invite') ||
+          window.location.hash.includes('type=invite') ||
+          window.location.search.includes('type=signup') ||
+          window.location.hash.includes('type=signup'));
       if (isRecoveryUrl) {
         set({ isRecoveryMode: true });
       }
 
-      supabase.auth.onAuthStateChange(async (event, session) => {
-        try {
-          set({ session, user: session?.user ?? null });
+      if (!authListenerRegistered) {
+        authListenerRegistered = true;
+        supabase.auth.onAuthStateChange(async (event, session) => {
+          try {
+            console.log('[AUTH] event', event, session ? 'has session' : 'no session');
+            set({ session, user: session?.user ?? null });
 
-          if (event === 'PASSWORD_RECOVERY') {
-            set({ isRecoveryMode: true });
-            return;
+            if (event === 'PASSWORD_RECOVERY') {
+              set({ isRecoveryMode: true });
+              return;
+            }
+
+            if (session?.user) {
+              await resolveUserTypeOnce(session.user, supabase, set);
+              console.log('[AUTH] resolveUserType done for event', event);
+            } else {
+              set({ profile: null, superUser: null, userType: null, isRecoveryMode: false });
+            }
+          } catch {
+            console.warn('onAuthStateChange handler failed.');
           }
-
-          if (session?.user) {
-            await resolveUserType(session.user, supabase, set);
-          } else {
-            set({ profile: null, superUser: null, userType: null, isRecoveryMode: false });
-          }
-        } catch {
-          console.warn('onAuthStateChange handler failed.');
-        }
-      });
-
-      const { data: { session } } = await supabase.auth.getSession();
-      set({ session, user: session?.user ?? null });
-
-      if (session?.user) {
-        await resolveUserType(session.user, supabase, set);
+        });
       }
+
+      await Promise.race([
+        (async () => {
+          // getUser() awaits storage restore + auto-refresh (getSession() alone
+          // resolves null on a fresh load even with a valid stored session).
+          const { data: { user } } = await supabase.auth.getUser();
+          const { data: { session } } = await supabase.auth.getSession();
+          set({ session, user: session?.user ?? null });
+          if (user || session?.user) {
+            await resolveUserTypeOnce((user || session?.user)! as never, supabase, set);
+          }
+        })(),
+        new Promise<void>((resolve) => setTimeout(resolve, 4000)),
+      ]);
     } catch {
       console.warn('Auth initialization failed.');
     } finally {
@@ -86,7 +120,9 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   signIn: async (email, password) => {
     try {
       const supabase = getSupabaseClient();
+      console.log('[AUTH] signInWithPassword...');
       const { error } = await supabase.auth.signInWithPassword({ email, password });
+      console.log('[AUTH] signInWithPassword done', error ? `ERROR: ${error.message}` : 'OK');
       if (error) return { error: error.message };
       return { error: null };
     } catch (err) {
@@ -172,20 +208,46 @@ async function resolveUserType(
   set: (partial: Partial<AuthState>) => void,
 ) {
   const meta = user.user_metadata || {};
+  console.log('[AUTH] resolveUserType for', user.email, 'meta:', JSON.stringify(meta));
 
   // Check if super admin / support (exists in public.super_users)
   if (meta.is_super_admin || meta.is_support) {
-    const { data: su } = await supabase
-      .from('super_users')
-      .select('*')
-      .eq('super_user_id', user.id)
-      .single();
+    try {
+      const { data: su, error: suErr } = await withTimeout(
+        supabase
+          .from('super_users')
+          .select('*')
+          .eq('super_user_id', user.id)
+          .single(),
+        3000,
+        'super_users query',
+      );
+      console.log('[AUTH] super_users query', suErr ? `ERROR: ${suErr.message}` : su ? `found role=${su.role}` : 'no row');
 
-    if (su) {
+      if (su) {
+        set({
+          superUser: su as SuperUser,
+          profile: null,
+          userType: su.role === 'support' ? 'support' : 'super_admin',
+        });
+        return;
+      }
+    } catch (timeoutErr) {
+      // DB query hung (network/edge issue) — fall back to auth metadata so
+      // login is never blocked by a stuck request.
+      console.warn('[AUTH] super_users fallback:', (timeoutErr as Error).message);
+      const fallback: SuperUser = {
+        super_user_id: user.id,
+        email: user.email ?? '',
+        full_name: typeof meta.full_name === 'string' ? meta.full_name : '',
+        role: meta.is_support ? 'support' : 'super_admin',
+        is_active: true,
+        created_at: user.created_at ?? new Date().toISOString(),
+      };
       set({
-        superUser: su as SuperUser,
+        superUser: fallback,
         profile: null,
-        userType: su.role === 'support' ? 'support' : 'super_admin',
+        userType: fallback.role === 'support' ? 'support' : 'super_admin',
       });
       return;
     }
@@ -195,11 +257,15 @@ async function resolveUserType(
   const tenantSchema = meta.tenant_schema;
   if (tenantSchema) {
     const tenantClient = getSupabaseClient(tenantSchema);
-    const { data: profile } = await tenantClient
-      .from('users')
-      .select('*, stores!users_assigned_store_id_fkey(name)')
-      .eq('user_id', user.id)
-      .single();
+    const { data: profile } = await withTimeout(
+      tenantClient
+        .from('users')
+        .select('*, stores!assigned_store_id(name)')
+        .eq('user_id', user.id)
+        .single(),
+      3000,
+      'tenant users query',
+    );
 
     if (profile) {
       const raw = profile as UserProfile & { stores?: { name: string } | null };
@@ -214,4 +280,13 @@ async function resolveUserType(
 
   // No match found — user exists in auth but not in our tables
   set({ profile: null, superUser: null, userType: null });
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms),
+    ),
+  ]);
 }

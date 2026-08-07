@@ -11,6 +11,21 @@ function getSupabaseAdmin(schema?: string) {
   return createClient(supabaseUrl, serviceRole, opts);
 }
 
+function emailConflictResponse(res: VercelResponse, existing: any) {
+  return res.status(409).json({
+    error: 'EMAIL_EXISTS',
+    message: 'This email is already registered to another user',
+    existingUser: {
+      id: existing.id,
+      email: existing.email,
+      full_name: existing.user_metadata?.full_name || '',
+      tenant_schema: existing.user_metadata?.tenant_schema || null,
+      confirmed_at: existing.confirmed_at || null,
+      last_sign_in_at: existing.last_sign_in_at || null,
+    },
+  });
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   let supabaseAdmin;
   try {
@@ -155,7 +170,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Users
     if (path[0] === 'users') {
       if (method === 'GET') {
-        const { data, error } = await supabaseAdmin.from('users').select('*, stores!users_assigned_store_id_fkey(name)').order('full_name');
+        const { data, error } = await supabaseAdmin.from('users').select('*, stores!assigned_store_id(name)').order('full_name');
         if (error) return res.status(400).json({ error: error.message });
         return res.json(data);
       }
@@ -454,7 +469,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const pinHash = crypto.createHash('sha256').update(pin).digest('hex');
       const { data: users, error } = await supabaseAdmin
         .from('users')
-        .select('*, stores!users_assigned_store_id_fkey(name)')
+        .select('*, stores!assigned_store_id(name)')
         .eq('pin_hash', pinHash)
         .eq('is_active', true);
       if (error) return res.status(500).json({ error: error.message });
@@ -840,8 +855,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (body.is_active !== undefined) update.is_active = !!body.is_active;
       if (body.slug !== undefined) {
         const slug = String(body.slug).trim().toLowerCase();
-        if (!/^[a-z0-9-]+$/.test(slug)) {
-          return res.status(400).json({ error: 'Slug can only contain lowercase letters, numbers, and hyphens' });
+        if (!/^[a-z0-9_-]+$/.test(slug)) {
+          return res.status(400).json({ error: 'Slug can only contain lowercase letters, numbers, hyphens, and underscores' });
         }
         const { data: clash } = await supabaseAdmin.from('tenants').select('tenant_id').eq('slug', slug).neq('tenant_id', path[2]).maybeSingle();
         if (clash) return res.status(400).json({ error: 'Slug already in use by another tenant' });
@@ -870,6 +885,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.json({ success: true });
     }
 
+    // ---- App: get current tenant info (by tenant_schema) ----
+    if (path[0] === 'app' && path[1] === 'tenant-info' && method === 'GET') {
+      const schema = (req.query.tenant_schema as string) || '';
+      if (!schema) return res.status(400).json({ error: 'tenant_schema required' });
+      const pub = getSupabaseAdmin();
+      const { data: tenant, error } = await pub.from('tenants')
+        .select('tenant_id, name, slug, schema_name')
+        .eq('schema_name', schema)
+        .maybeSingle();
+      if (error) return res.status(500).json({ error: error.message });
+      if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+      return res.json(tenant);
+    }
+
     // ---- Admin: invite tenant main user (when none exists) ----
     if (path[0] === 'admin' && path[1] === 'tenants' && path[2] && path.length === 4 && path[3] === 'main-user' && method === 'POST') {
       const { data: tenant } = await supabaseAdmin.from('tenants').select('*').eq('tenant_id', path[2]).maybeSingle();
@@ -883,6 +912,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const { data: inviteData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
         data: { tenant_schema: tenant.schema_name, is_tenant_admin: true, full_name },
+        redirectTo: process.env.APP_URL || req.headers.origin || undefined,
       });
       if (inviteError) return res.status(400).json({ error: inviteError.message });
 
@@ -956,10 +986,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(user_id);
       if (!authUser?.user) return res.status(404).json({ error: 'Auth user not found' });
 
+      // Proactively detect email conflicts before calling updateUserById:
+      // GoTrue can return a generic "Error updating user" message on conflicts,
+      // so check the target email up front for a deterministic result.
+      const emailChanged = email.toLowerCase() !== (authUser.user.email || '').toLowerCase();
+      if (emailChanged) {
+        const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+        const conflicting = (authUsers?.users || []).find(
+          (u: any) => u.email?.toLowerCase() === email.toLowerCase() && u.id !== user_id,
+        );
+        if (conflicting) return emailConflictResponse(res, conflicting);
+      }
+
       const authUpdate: any = { user_metadata: { ...(authUser.user.user_metadata || {}), full_name } };
-      if (email !== authUser.user.email) authUpdate.email = email;
+      if (emailChanged) authUpdate.email = email;
       const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(user_id, authUpdate);
-      if (authError) return res.status(400).json({ error: authError.message });
+      if (authError) {
+        // Fallback: if the update failed while changing the email, re-check for
+        // a conflict (the error message may not clearly indicate one).
+        if (emailChanged) {
+          const { data: authUsers } = await supabaseAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+          const conflicting = (authUsers?.users || []).find(
+            (u: any) => u.email?.toLowerCase() === email.toLowerCase() && u.id !== user_id,
+          );
+          if (conflicting) return emailConflictResponse(res, conflicting);
+        }
+        return res.status(400).json({ error: authError.message });
+      }
 
       let warning: string | null = null;
       try {
@@ -974,6 +1027,73 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.json({ success: true, ...(warning ? { warning } : {}) });
     }
 
+    // ---- Admin: reassign main user to an existing auth user ----
+    if (path[0] === 'admin' && path[1] === 'tenants' && path[2] && path[3] === 'main-user' && path[4] === 'reassign' && method === 'POST') {
+      const { data: tenant } = await supabaseAdmin.from('tenants').select('schema_name').eq('tenant_id', path[2]).maybeSingle();
+      if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+      const { existing_user_id } = body;
+      if (!existing_user_id || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(existing_user_id)) {
+        return res.status(400).json({ error: 'existing_user_id (UUID) required' });
+      }
+
+      // Get the existing auth user
+      const { data: existingUser, error: getUserError } = await supabaseAdmin.auth.admin.getUserById(existing_user_id);
+      if (getUserError || !existingUser?.user) return res.status(404).json({ error: 'Existing user not found' });
+
+      const user = existingUser.user;
+      const oldTenantSchema = user.user_metadata?.tenant_schema;
+
+      // Update the existing user's metadata to point to this tenant
+      const { error: updateMetaError } = await supabaseAdmin.auth.admin.updateUserById(existing_user_id, {
+        user_metadata: {
+          ...(user.user_metadata || {}),
+          tenant_schema: tenant.schema_name,
+          is_tenant_admin: true,
+        },
+      });
+      if (updateMetaError) return res.status(400).json({ error: updateMetaError.message });
+
+      // Deactivate the previous main user for this tenant (if different from the new one)
+      if (oldTenantSchema && oldTenantSchema !== tenant.schema_name) {
+        try {
+          const oldTenantAdmin = getSupabaseAdmin(oldTenantSchema);
+          await oldTenantAdmin.from('users')
+            .update({ is_active: false })
+            .eq('role', 'super_user');
+        } catch {
+          // old tenant schema may not exist or other error - ignore
+        }
+      }
+
+      // Create/update the tenant profile for the new main user
+      let warning: string | null = null;
+      try {
+        const tenantAdmin = getSupabaseAdmin(tenant.schema_name);
+        const { error: dbError } = await tenantAdmin.from('users').upsert({
+          user_id: existing_user_id,
+          username: user.email?.split('@')[0] || 'user',
+          email: user.email,
+          full_name: user.user_metadata?.full_name || '',
+          role: 'super_user',
+          is_active: true,
+        }, { onConflict: 'user_id' });
+        if (dbError) warning = `Main user reassigned, but tenant profile could not be created/updated: ${dbError.message}`;
+      } catch (e) {
+        warning = `Main user reassigned, but tenant profile could not be created/updated: ${(e as Error).message}`;
+      }
+
+      // If user is unconfirmed, send invitation email
+      if (!user.confirmed_at) {
+        const { error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(user.email!, {
+          data: { tenant_schema: tenant.schema_name, is_tenant_admin: true },
+          redirectTo: process.env.APP_URL || req.headers.origin || undefined,
+        });
+        if (inviteError) warning = (warning ? warning + '; ' : '') + `Invitation failed: ${inviteError.message}`;
+      }
+
+      return res.json({ success: true, user_id: existing_user_id, ...(warning ? { warning } : {}) });
+    }
+
     // ---- Admin: resend tenant main user access email ----
     if (path[0] === 'admin' && path[1] === 'tenants' && path[2] && path[3] === 'main-user' && path[4] === 'resend-invite' && method === 'POST') {
       const { data: tenant } = await supabaseAdmin.from('tenants').select('schema_name').eq('tenant_id', path[2]).maybeSingle();
@@ -985,6 +1105,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!authUser.confirmed_at) {
         const { error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(authUser.email!, {
           data: { tenant_schema: tenant.schema_name, is_tenant_admin: true },
+          redirectTo: process.env.APP_URL || req.headers.origin || undefined,
         });
         if (inviteError) return res.status(400).json({ error: inviteError.message });
         return res.json({ success: true, method: 'invite' });
@@ -1047,6 +1168,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const schemaName = `tenant_${tenantId?.toString().replace(/-/g, '')}`;
       const { data: inviteData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(admin_email, {
         data: { tenant_schema: schemaName, is_tenant_admin: true },
+        redirectTo: process.env.APP_URL || req.headers.origin || undefined,
       });
       if (inviteError) {
         return res.json({ tenant_id: tenantId, warning: `Tenant created but invite failed: ${inviteError.message}` });
@@ -1083,6 +1205,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       const { data: inviteData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
         data: { is_super_admin: role === 'super_admin', is_support: role === 'support', full_name },
+        redirectTo: process.env.APP_URL || req.headers.origin || undefined,
       });
       if (inviteError) return res.status(400).json({ error: inviteError.message });
       if (!inviteData?.user) return res.status(400).json({ error: 'Failed to create user' });

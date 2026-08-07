@@ -1,6 +1,6 @@
 // src/components/Layout/Sidebar.tsx
 import { useState, useCallback } from 'react';
-import { useLocation, useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate, useParams } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
 import { useAppStore } from '../../store/appStore';
 import ThemeToggle from '../UI/ThemeToggle';
@@ -107,6 +107,12 @@ function SectionHeader({
 export default function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { slug } = useParams();
+  const appPrefix = `/app/${slug}`;
+  const prefixPath = useCallback(
+    (path: string) => (path.startsWith('/app/') ? `${appPrefix}${path.slice(4)}` : path),
+    [appPrefix],
+  );
   const { profile, superUser, userType, signOut } = useAuthStore();
   const displayName = profile?.full_name ?? superUser?.full_name ?? 'Loading…';
   const displayRole = userType === 'super_admin' ? 'System Admin'
@@ -132,7 +138,7 @@ export default function Sidebar() {
     if (item.external) {
       window.location.href = item.path;
     } else {
-      navigate(item.path);
+      navigate(prefixPath(item.path));
     }
   };
 
@@ -173,8 +179,8 @@ export default function Sidebar() {
       <nav className="sidebar-nav">
         {/* Dashboard — always visible, no section */}
         <button
-          className={`nav-item ${isActive('/app/dashboard') ? 'active' : ''}`}
-          onClick={() => navigate('/app/dashboard')}
+          className={`nav-item ${isActive(prefixPath('/app/dashboard')) ? 'active' : ''}`}
+          onClick={() => navigate(prefixPath('/app/dashboard'))}
           title={sidebarCollapsed ? 'Dashboard' : undefined}
         >
           <span className="nav-icon">📊</span>
@@ -194,7 +200,7 @@ export default function Sidebar() {
              {(expandedSections[section.name] ?? false) && section.items.map((item) => (
               <button
                 key={item.path}
-                className={`nav-item ${isActive(item.path) ? 'active' : ''}`}
+                className={`nav-item ${isActive(prefixPath(item.path)) ? 'active' : ''}`}
                 onClick={() => handleNavClick(item)}
                 title={sidebarCollapsed ? item.label : undefined}
               >
@@ -208,8 +214,8 @@ export default function Sidebar() {
 
       <div className="sidebar-footer">
         <button
-          className={`nav-item ${isActive('/app/help/faq') ? 'active' : ''}`}
-          onClick={() => navigate('/app/help/faq')}
+          className={`nav-item ${isActive(prefixPath('/app/help/faq')) ? 'active' : ''}`}
+          onClick={() => navigate(prefixPath('/app/help/faq'))}
           title={sidebarCollapsed ? 'FAQ & Support' : undefined}
         >
           <span className="nav-icon">❓</span>

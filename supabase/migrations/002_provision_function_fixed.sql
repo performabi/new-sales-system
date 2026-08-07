@@ -556,6 +556,14 @@ BEGIN
     v_schema, v_schema, v_schema);
 
   -- =============================================
+  -- GRANT API ACCESS (anon, authenticated, service_role)
+  -- =============================================
+  EXECUTE format('GRANT USAGE ON SCHEMA %I TO anon, authenticated, service_role', v_schema);
+  EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO anon, authenticated, service_role', v_schema);
+  EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO anon, authenticated, service_role', v_schema);
+  EXECUTE format('GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA %I TO anon, authenticated, service_role', v_schema);
+
+  -- =============================================
   -- Register tenant
   -- =============================================
   INSERT INTO public.tenants (tenant_id, name, slug, schema_name, plan_id)

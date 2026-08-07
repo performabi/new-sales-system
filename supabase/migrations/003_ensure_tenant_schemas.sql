@@ -603,6 +603,14 @@ BEGIN
         WITH CHECK (%I.get_user_role() IN (''super_user'', ''admin''))',
       v_schema, v_schema, v_schema);
 
+    -- =============================================
+    -- GRANT API ACCESS (anon, authenticated, service_role)
+    -- =============================================
+    EXECUTE format('GRANT USAGE ON SCHEMA %I TO anon, authenticated, service_role', v_schema);
+    EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO anon, authenticated, service_role', v_schema);
+    EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO anon, authenticated, service_role', v_schema);
+    EXECUTE format('GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA %I TO anon, authenticated, service_role', v_schema);
+
   END LOOP;
 END;
 $outer$;
