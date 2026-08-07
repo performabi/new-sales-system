@@ -208,7 +208,7 @@ async function resolveUserType(
   // Check if super admin / support (exists in public.super_users)
   if (meta.is_super_admin || meta.is_support) {
     try {
-      const { data: su, error: suErr } = await withTimeout(
+      const { data: su } = await withTimeout(
         supabase
           .from('super_users')
           .select('*')
@@ -276,7 +276,7 @@ async function resolveUserType(
   set({ profile: null, superUser: null, userType: null });
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+function withTimeout<T>(promise: PromiseLike<T>, ms: number, label: string): Promise<T> {
   return Promise.race([
     promise,
     new Promise<never>((_, reject) =>
