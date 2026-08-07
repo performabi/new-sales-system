@@ -77,7 +77,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
         authListenerRegistered = true;
         supabase.auth.onAuthStateChange(async (event, session) => {
           try {
-            console.log('[AUTH] event', event, session ? 'has session' : 'no session');
             set({ session, user: session?.user ?? null });
 
             if (event === 'PASSWORD_RECOVERY') {
@@ -87,7 +86,6 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
             if (session?.user) {
               await resolveUserTypeOnce(session.user, supabase, set);
-              console.log('[AUTH] resolveUserType done for event', event);
             } else {
               set({ profile: null, superUser: null, userType: null, isRecoveryMode: false });
             }
@@ -120,9 +118,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   signIn: async (email, password) => {
     try {
       const supabase = getSupabaseClient();
-      console.log('[AUTH] signInWithPassword...');
       const { error } = await supabase.auth.signInWithPassword({ email, password });
-      console.log('[AUTH] signInWithPassword done', error ? `ERROR: ${error.message}` : 'OK');
       if (error) return { error: error.message };
       return { error: null };
     } catch (err) {
@@ -208,7 +204,6 @@ async function resolveUserType(
   set: (partial: Partial<AuthState>) => void,
 ) {
   const meta = user.user_metadata || {};
-  console.log('[AUTH] resolveUserType for', user.email, 'meta:', JSON.stringify(meta));
 
   // Check if super admin / support (exists in public.super_users)
   if (meta.is_super_admin || meta.is_support) {
@@ -222,7 +217,6 @@ async function resolveUserType(
         3000,
         'super_users query',
       );
-      console.log('[AUTH] super_users query', suErr ? `ERROR: ${suErr.message}` : su ? `found role=${su.role}` : 'no row');
 
       if (su) {
         set({

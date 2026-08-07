@@ -67,9 +67,7 @@ export default function Landing() {
     const form = new FormData(e.currentTarget);
     const enteredEmail = String(form.get('email') || '').trim();
     const enteredPassword = String(form.get('password') || '');
-    console.log('[LOGIN] submitting', { email: enteredEmail, hasPassword: !!enteredPassword });
     const { error: err } = await signIn(enteredEmail, enteredPassword);
-    console.log('[LOGIN] signIn result', err ? `ERROR: ${err}` : 'OK (no error)');
     setIsSubmitting(false);
     if (err) setError(err);
   };
