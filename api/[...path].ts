@@ -1,6 +1,19 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import crypto from 'crypto';
+import {
+  resolveIdentity,
+  isPublicPath,
+  isSuperAdminUser,
+  identityHasSchema,
+  defaultSchemaFor,
+  hashPin,
+  verifyPin,
+  signPosToken,
+  isPosLoginThrottled,
+  recordPosAttempt,
+  requestIp,
+  type Identity,
+} from '../src/server/apiAuth';
 
 function getSupabaseAdmin(schema?: string) {
   const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
@@ -41,6 +54,7 @@ function emailConflictResponse(res: VercelResponse, existing: any) {
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   let supabaseAdmin;
+  let identity: Identity | null = null;
   const rawPath = req.query.path;
   let path: string[] = [];
   if (Array.isArray(rawPath)) path = rawPath.map(String);
@@ -49,8 +63,50 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const body = req.body || {};
 
   try {
-    const schema = path[0] === 'admin' ? 'public' : ((req.query.tenant_schema as string) || (req.body?.tenant_schema as string));
-    supabaseAdmin = getSupabaseAdmin(schema);
+    const env = {
+      supabaseUrl: process.env.VITE_SUPABASE_URL || '',
+      serviceRole: process.env.SERVICE_ROLE || '',
+      anonKey: process.env.VITE_SUPABASE_ANON_KEY || '',
+    };
+
+    // ---- Auth guard (public allowlist bypasses) ----
+    if (!isPublicPath(method, path.join('/'))) {
+      identity = await resolveIdentity(req, env);
+      if (!identity) {
+        return res.status(401).json({ error: 'Unauthorized — missing or invalid session' });
+      }
+      if (path[0] === 'admin') {
+        const posListing =
+          identity.kind === 'pos' &&
+          identity.payload.role === 'super_admin' &&
+          method === 'GET' &&
+          (path.join('/') === 'admin/tenants' || path.join('/') === 'admin/stores');
+        if (identity.kind !== 'jwt' && !posListing) {
+          return res.status(403).json({ error: 'Super admin session required' });
+        }
+        if (identity.kind === 'jwt') {
+          const isAdmin = await isSuperAdminUser(env, identity.user.id);
+          if (!isAdmin) {
+            return res.status(403).json({ error: 'Super admin session required' });
+          }
+        }
+      }
+    }
+
+    let schema = path[0] === 'admin' ? 'public' : ((req.query.tenant_schema as string) || (req.body?.tenant_schema as string) || '');
+    if (path[0] !== 'admin' && !isPublicPath(method, path.join('/'))) {
+      if (schema) {
+        if (identity && !identityHasSchema(identity, schema)) {
+          return res.status(403).json({ error: 'Not a member of this tenant' });
+        }
+      } else {
+        schema = defaultSchemaFor(identity!) || '';
+        if (!schema) {
+          return res.status(400).json({ error: 'tenant_schema is required' });
+        }
+      }
+    }
+    supabaseAdmin = getSupabaseAdmin(schema || undefined);
   } catch (e) {
     return res.status(500).json({ error: (e as Error).message });
   }
@@ -183,12 +239,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     // Users
     if (path[0] === 'users') {
       if (method === 'GET') {
-        const { data, error } = await supabaseAdmin.from('users').select('*, stores!assigned_store_id(name)').order('full_name');
+        const { data, error } = await supabaseAdmin.from('users').select('user_id, email, username, full_name, role, is_active, requires_password_change, assigned_store_id, created_at, created_by, stores!assigned_store_id(name)').order('full_name');
         if (error) return res.status(400).json({ error: error.message });
         return res.json(data);
       }
       if (path[1] === 'create' && method === 'POST') {
         const { email, username, full_name, role, pin, assigned_store_id, created_by } = body;
+        if (!/^\d{4,8}$/.test(String(pin || ''))) {
+          return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+        }
         const schema = (req.query.tenant_schema as string) || (body.tenant_schema as string);
         const authAdmin = getSupabaseAdmin();
         const { data: listData } = await authAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
@@ -236,7 +295,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { data: existingRow } = await supabaseAdmin.from('users').select('user_id').eq('user_id', authUserId).maybeSingle();
         if (existingRow) return res.status(409).json({ error: 'User is already a member of this tenant' });
 
-        const pinHash = crypto.createHash('sha256').update(pin).digest('hex');
+        const pinHash = hashPin(pin);
         const { error: profileError } = await supabaseAdmin.from('users').insert({
           user_id: authUserId, email, username, full_name, role,
           pin_hash: pinHash, is_active: true, assigned_store_id: assigned_store_id || null,
@@ -248,7 +307,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
         return res.json({ success: true, user_id: authUserId, linked, invited });
       }
-      if (path[1] && method === 'PUT' && path[2] !== 'reset-password') {
+      if (path[1] && method === 'PUT' && path[2] !== 'reset-password' && path[2] !== 'resend-invite') {
         const { email, password, username, full_name, role, is_active, assigned_store_id, pin } = body;
         const authUpdates: any = {};
         if (email) authUpdates.email = email;
@@ -257,10 +316,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const { error: authError } = await supabaseAdmin.auth.admin.updateUserById(path[1], authUpdates);
           if (authError) return res.status(400).json({ error: authError.message });
         }
-        const pinUpdate = pin ? { pin_hash: crypto.createHash('sha256').update(pin).digest('hex') } : {};
-        const { error: profileError } = await supabaseAdmin.from('users').update({
-          email, username, full_name, role, is_active, assigned_store_id: assigned_store_id || null, ...pinUpdate,
-        }).eq('user_id', path[1]);
+        const pinUpdate = pin ? { pin_hash: hashPin(String(pin)) } : {};
+        const profileUpdate: any = { email, username, full_name, role, is_active, ...pinUpdate };
+        if ('assigned_store_id' in body) profileUpdate.assigned_store_id = assigned_store_id || null;
+        const { error: profileError } = await supabaseAdmin.from('users').update(profileUpdate).eq('user_id', path[1]);
         if (profileError) return res.status(400).json({ error: profileError.message });
         return res.json({ success: true });
       }
@@ -271,8 +330,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       if (path[1] && path[2] === 'reset-password' && method === 'PUT') {
         const { newPassword } = body;
-        const password = newPassword || 'Sales12345';
-        const { error } = await supabaseAdmin.auth.admin.updateUserById(path[1], { password });
+        if (!newPassword || String(newPassword).length < 8) {
+          return res.status(400).json({ error: 'newPassword is required (min 8 characters)' });
+        }
+        const { error } = await supabaseAdmin.auth.admin.updateUserById(path[1], { password: String(newPassword) });
         if (error) return res.status(400).json({ error: error.message });
         return res.json({ success: true });
       }
@@ -447,8 +508,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const { data: salesData } = await supabaseAdmin
         .from('sale_items')
-        .select('plu_id, quantity, sales_transactions!inner(store_id, transaction_date)')
-        .gte('sales_transactions.transaction_date', sevenDaysAgo)
+        .select('plu_id, quantity, sales_transactions!inner(store_id, created_at)')
+        .gte('sales_transactions.created_at', sevenDaysAgo)
         .eq('sales_transactions.store_id', store_id);
 
       const salesMap = new Map<string, number>();
@@ -550,32 +611,56 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.json(data);
     }
 
-    // POS: PIN Login
+    // POS: PIN Login (salted verify + self-migration, rate-limited, HMAC session token)
     if (path[0] === 'pos' && path[1] === 'login' && method === 'POST') {
       const { pin } = body;
-      if (!pin || pin.length < 4) {
-        return res.status(400).json({ error: 'PIN must be at least 4 digits' });
+      if (!/^\d{4,8}$/.test(String(pin || ''))) {
+        return res.status(400).json({ error: 'PIN must be 4-8 digits' });
       }
       const schema = (req.query.tenant_schema as string) || (body.tenant_schema as string) || '';
       if (!schema) {
         return res.status(400).json({ error: 'tenant_schema is required' });
       }
+      const env = { supabaseUrl: process.env.VITE_SUPABASE_URL || '', serviceRole: process.env.SERVICE_ROLE || '', anonKey: '' };
+      const identifier = `${schema}:${String(pin).length}`;
+      if (await isPosLoginThrottled(env, identifier)) {
+        return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+      }
+      const tenantCheck = await getSupabaseAdmin('public').from('tenants').select('schema_name').eq('schema_name', schema).maybeSingle();
+      if (!tenantCheck.data) {
+        await recordPosAttempt(env, identifier, false, requestIp(req));
+        return res.status(404).json({ error: 'Tenant not found' });
+      }
       const tenantClient = getSupabaseAdmin(schema);
-      const pinHash = crypto.createHash('sha256').update(pin).digest('hex');
-      const { data: users, error } = await tenantClient
+      const { data: users } = await tenantClient
         .from('users')
-        .select('*, stores!assigned_store_id(name)')
-        .eq('pin_hash', pinHash)
+        .select('user_id, username, full_name, role, pin_hash, is_active, assigned_store_id, stores!assigned_store_id(name)')
         .eq('is_active', true);
-      if (error) return res.status(500).json({ error: error.message });
       if (!users || users.length === 0) {
+        await recordPosAttempt(env, identifier, false, requestIp(req));
         return res.status(401).json({ error: 'Invalid PIN' });
       }
-      const user = users[0];
+      const user = users.find((u: any) => verifyPin(String(pin), u.pin_hash).ok);
+      if (!user) {
+        await recordPosAttempt(env, identifier, false, requestIp(req));
+        return res.status(401).json({ error: 'Invalid PIN' });
+      }
+      const check = verifyPin(String(pin), user.pin_hash);
+      if (check.upgradedHash) {
+        await tenantClient.from('users').update({ pin_hash: check.upgradedHash }).eq('user_id', user.user_id);
+      }
       const { data: authUser } = await tenantClient.auth.admin.getUserById(user.user_id);
       if (authUser?.user && !authUser.user.confirmed_at) {
+        await recordPosAttempt(env, identifier, false, requestIp(req));
         return res.status(401).json({ error: 'Please verify your email before using the terminal' });
       }
+      await recordPosAttempt(env, identifier, true, requestIp(req));
+      const posToken = signPosToken(env, {
+        uid: user.user_id,
+        schema,
+        store_id: user.assigned_store_id || undefined,
+        role: user.role,
+      });
       return res.json({
         user: {
           user_id: user.user_id,
@@ -583,33 +668,60 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           full_name: user.full_name,
           role: user.role,
           assigned_store_id: user.assigned_store_id,
-          assigned_store_name: user.stores?.name || null,
+          assigned_store_name: (user.stores as any)?.name || null,
         },
+        pos_token: posToken,
+        expires_in: 43200,
       });
     }
 
-    // POS: Admin PIN Login (checks super_users, accepts store_id from body)
+    // POS: Admin PIN Login (checks super_users, accepts store_id from body; verify_only returns pending token)
     if (path[0] === 'pos' && path[1] === 'admin-login' && method === 'POST') {
-      const { pin, store_id, store_name } = body;
-      if (!pin || pin.length < 4) {
-        return res.status(400).json({ error: 'PIN required' });
-      }
-      if (!/^\d{4,8}$/.test(String(pin))) {
+      const { pin, store_id, store_name, tenant_schema, verify_only } = body;
+      if (!/^\d{4,8}$/.test(String(pin || ''))) {
         return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+      }
+      const env = { supabaseUrl: process.env.VITE_SUPABASE_URL || '', serviceRole: process.env.SERVICE_ROLE || '', anonKey: '' };
+      const identifier = `admin:${String(pin).length}`;
+      if (await isPosLoginThrottled(env, identifier)) {
+        return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+      }
+      const supabasePublic = getSupabaseAdmin('public');
+      const { data: suList } = await supabasePublic
+        .from('super_users')
+        .select('super_user_id, email, full_name, pin_hash, role')
+        .eq('is_active', true);
+      const su = (suList || []).find((u: any) => verifyPin(String(pin), u.pin_hash).ok);
+      if (!su) {
+        await recordPosAttempt(env, identifier, false, requestIp(req));
+        return res.status(401).json({ error: 'Invalid PIN' });
+      }
+      const check = verifyPin(String(pin), su.pin_hash);
+      if (check.upgradedHash) {
+        await supabasePublic.from('super_users').update({ pin_hash: check.upgradedHash }).eq('super_user_id', su.super_user_id);
+      }
+      await recordPosAttempt(env, identifier, true, requestIp(req));
+      if (verify_only) {
+        const pendingToken = signPosToken(env, {
+          uid: su.super_user_id,
+          schema: 'public',
+          store_id: 'pending',
+          role: 'super_admin',
+        });
+        return res.json({ verified: true, pending_token: pendingToken, user: { user_id: su.super_user_id, full_name: su.full_name, role: 'super_admin' } });
       }
       if (!store_id) {
         return res.status(400).json({ error: 'store_id required' });
       }
-      const pinHash = crypto.createHash('sha256').update(String(pin)).digest('hex');
-      const supabasePublic = getSupabaseAdmin('public');
-      const { data: su, error } = await supabasePublic
-        .from('super_users')
-        .select('*')
-        .eq('pin_hash', pinHash)
-        .eq('is_active', true)
-        .maybeSingle();
-      if (error) return res.status(500).json({ error: error.message });
-      if (!su) return res.status(401).json({ error: 'Invalid PIN' });
+      if (!tenant_schema) {
+        return res.status(400).json({ error: 'tenant_schema required' });
+      }
+      const posToken = signPosToken(env, {
+        uid: su.super_user_id,
+        schema: tenant_schema,
+        store_id,
+        role: 'super_admin',
+      });
       return res.json({
         user: {
           user_id: su.super_user_id,
@@ -619,22 +731,62 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           assigned_store_id: store_id,
           assigned_store_name: store_name || null,
         },
+        pos_token: posToken,
+        expires_in: 43200,
       });
     }
 
-    // POS: Clock In
+    // POS: Admin finalize store selection (pending token → full token)
+    if (path[0] === 'pos' && path[1] === 'admin-finalize' && method === 'POST') {
+      const { tenant_schema, store_id, store_name } = body;
+      if (!tenant_schema || !store_id) {
+        return res.status(400).json({ error: 'tenant_schema and store_id required' });
+      }
+      if (!identity || identity.kind !== 'pos' || identity.payload.role !== 'super_admin' || identity.payload.store_id !== 'pending') {
+        return res.status(403).json({ error: 'Verify your PIN first' });
+      }
+      const tenantAdmin = getSupabaseAdmin(tenant_schema);
+      const { data: store } = await tenantAdmin.from('stores').select('store_id, name').eq('store_id', store_id).maybeSingle();
+      if (!store) return res.status(400).json({ error: 'Store not found in this tenant' });
+      const env = { supabaseUrl: process.env.VITE_SUPABASE_URL || '', serviceRole: process.env.SERVICE_ROLE || '', anonKey: '' };
+      const posToken = signPosToken(env, {
+        uid: identity.payload.uid,
+        schema: tenant_schema,
+        store_id,
+        role: 'super_admin',
+      });
+      return res.json({
+        user: {
+          user_id: identity.payload.uid,
+          full_name: null,
+          role: 'super_admin',
+          assigned_store_id: store_id,
+          assigned_store_name: store_name || store.name,
+        },
+        pos_token: posToken,
+        expires_in: 43200,
+      });
+    }
+
+    // POS: Clock In (identity-bound)
     if (path[0] === 'pos' && path[1] === 'clock-in' && method === 'POST') {
       const { store_id, user_id } = body;
       if (!store_id || !user_id) return res.status(400).json({ error: 'store_id and user_id required' });
+      if (identity?.kind === 'pos' && identity.payload.uid !== user_id) return res.status(403).json({ error: 'Cannot clock in as another user' });
+      if (identity?.kind === 'jwt' && identity.user.id !== user_id) return res.status(403).json({ error: 'Cannot clock in as another user' });
+      const { data: store } = await supabaseAdmin.from('stores').select('store_id').eq('store_id', store_id).maybeSingle();
+      if (!store) return res.status(400).json({ error: 'Store not found in this tenant' });
       const { data, error } = await supabaseAdmin.from('staff_timesheets').insert({ store_id, user_id, clock_in: new Date().toISOString() }).select().single();
       if (error) return res.status(400).json({ error: error.message });
       return res.json({ success: true, timesheet: data });
     }
 
-    // POS: Clock Out
+    // POS: Clock Out (identity-bound)
     if (path[0] === 'pos' && path[1] === 'clock-out' && method === 'PUT') {
       const { user_id } = body;
       if (!user_id) return res.status(400).json({ error: 'user_id required' });
+      if (identity?.kind === 'pos' && identity.payload.uid !== user_id) return res.status(403).json({ error: 'Cannot clock out another user' });
+      if (identity?.kind === 'jwt' && identity.user.id !== user_id) return res.status(403).json({ error: 'Cannot clock out another user' });
       const { data: open } = await supabaseAdmin.from('staff_timesheets').select('*').eq('user_id', user_id).is('clock_out', null).order('clock_in', { ascending: false }).limit(1).maybeSingle();
       if (!open) return res.status(400).json({ error: 'No open clock-in found' });
       const { data, error } = await supabaseAdmin.from('staff_timesheets').update({ clock_out: new Date().toISOString() }).eq('timesheet_id', open.timesheet_id).select().single();
@@ -642,10 +794,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.json({ success: true, timesheet: data });
     }
 
-    // POS: Clock Status
+    // POS: Clock Status (identity-bound)
     if (path[0] === 'pos' && path[1] === 'clock-status' && method === 'GET') {
       const user_id = typeof req.query.user_id === 'string' ? req.query.user_id : null;
       if (!user_id) return res.status(400).json({ error: 'user_id required' });
+      if (identity?.kind === 'pos' && identity.payload.uid !== user_id) return res.status(403).json({ error: 'Cannot view another user' });
+      if (identity?.kind === 'jwt' && identity.user.id !== user_id) return res.status(403).json({ error: 'Cannot view another user' });
       const { data, error } = await supabaseAdmin.from('staff_timesheets').select('*').eq('user_id', user_id).order('clock_in', { ascending: false }).limit(5);
       if (error) return res.status(400).json({ error: error.message });
       return res.json(data);
@@ -751,9 +905,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.json(data);
     }
 
-    // Loyalty Cards: create
+    // Loyalty Cards: create (public registration — rate-limited, no balance injection)
     if (path[0] === 'loyalty-cards' && path[1] === 'create' && method === 'POST') {
-      const { customer_name, phone, email, cashback_balance } = body;
+      const { customer_name, phone, email } = body;
       if (!customer_name) return res.status(400).json({ error: 'customer_name required' });
       let schema = (req.query.tenant_schema as string) || body.tenant_schema || '';
       const slug = body.tenant_slug || (req.query.tenant_slug as string) || '';
@@ -764,6 +918,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         schema = tenant.schema_name;
       }
       if (!schema) return res.status(400).json({ error: 'tenant_schema or tenant_slug required' });
+      const env = { supabaseUrl: process.env.VITE_SUPABASE_URL || '', serviceRole: process.env.SERVICE_ROLE || '', anonKey: '' };
+      const ipKey = `loyalty-create:${requestIp(req) || 'unknown'}`;
+      if (await isPosLoginThrottled(env, ipKey)) {
+        return res.status(429).json({ error: 'Too many requests. Try again later.' });
+      }
       const client = getSupabaseAdmin(schema);
       const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
       const { count } = await client.from('loyalty_cards').select('card_number', { count: 'exact', head: true })
@@ -773,9 +932,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { data, error } = await client.from('loyalty_cards').insert({
         store_id: body.store_id || null, card_number, customer_name: customer_name.trim(),
         phone: phone || null, email: email || null, postcode: body.postcode || null,
-        cashback_balance: cashback_balance ?? 0,
+        cashback_balance: 0,
       }).select().single();
       if (error) return res.status(400).json({ error: error.message });
+      await recordPosAttempt(env, ipKey, true, requestIp(req));
       return res.json({ success: true, card: data });
     }
 
@@ -802,23 +962,72 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.json(data);
     }
 
-    // Sales: create
+    // Sales: create (server-validated totals, payment allowlist, persisted cashback)
     if (path[0] === 'sales' && path[1] === 'create' && method === 'POST') {
       const { store_id, staff_user_id, items, total_amount, discount_amount, payment_method, payment_note, loyalty_card_id } = body;
-      if (!store_id || !staff_user_id || !items?.length) {
+      const PAYMENT_METHODS = ['cash', 'card', 'bank_transfer', 'contactless', 'transfer'];
+      if (!store_id || !staff_user_id || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: 'store_id, staff_user_id, and items required' });
       }
+      if (!items.every((i: any) => i && typeof i.plu_id === 'string' && typeof i.plu_name === 'string' && typeof i.quantity === 'number' && i.quantity > 0 && typeof i.unit_price === 'number')) {
+        return res.status(400).json({ error: 'Invalid item payload' });
+      }
+      if (!PAYMENT_METHODS.includes(payment_method || 'cash')) {
+        return res.status(400).json({ error: `payment_method must be one of: ${PAYMENT_METHODS.join(', ')}` });
+      }
+      const { data: store } = await supabaseAdmin.from('stores').select('store_id, store_number').eq('store_id', store_id).maybeSingle();
+      if (!store) return res.status(400).json({ error: 'Store not found in this tenant' });
+      const round2 = (n: number) => Math.round(n * 100) / 100;
+      // Server-side price validation: every line must match the PLU's configured price
+      const pluIds = [...new Set(items.map((i: any) => i.plu_id))];
+      const { data: pluRows } = await supabaseAdmin.from('plu').select('*').in('plu_id', pluIds);
+      const pluMap = new Map((pluRows ?? []).map((p: any) => [p.plu_id, p]));
+      for (const item of items) {
+        const plu = pluMap.get(item.plu_id);
+        if (!plu) {
+          return res.status(400).json({ error: `Unknown PLU: ${item.plu_name}` });
+        }
+        const storePrice = Number(plu[`store_${store.store_number}`] ?? 0);
+        const expected = storePrice > 0 ? storePrice : Number(plu.headoffice_price ?? 0);
+        if (round2(Number(item.unit_price)) !== round2(expected)) {
+          return res.status(400).json({ error: `Price mismatch for ${item.plu_name}: expected ${expected}` });
+        }
+      }
+      const { data: staff } = await supabaseAdmin.from('users')
+        .select('user_id, role, is_active, assigned_store_id').eq('user_id', staff_user_id).maybeSingle();
+      if (!staff || !staff.is_active) return res.status(401).json({ error: 'Invalid staff member' });
+      if (staff.role !== 'super_admin' && staff.assigned_store_id !== store_id) {
+        return res.status(403).json({ error: 'Staff member is not assigned to this store' });
+      }
+      // POS operator binding: staff tokens can only record their own sales
+      if (identity?.kind === 'pos' && identity.payload.role !== 'super_admin' && identity.payload.uid !== staff_user_id) {
+        return res.status(403).json({ error: 'Sale must be recorded against the signed-in staff member' });
+      }
+      const computedTotal = round2(items.reduce((sum: number, i: any) => sum + round2(i.quantity * i.unit_price), 0));
+      const discount = Math.min(round2(Number(discount_amount) || 0), computedTotal);
+      const total = round2(computedTotal - discount);
+      if (Number(total_amount) !== total) {
+        return res.status(400).json({ error: 'total_amount does not match computed total' });
+      }
+      if (discount > 0 && !loyalty_card_id) {
+        return res.status(400).json({ error: 'Discount requires a loyalty card' });
+      }
+      const { data: settings } = await supabaseAdmin.from('system_settings').select('value').eq('key', 'loyalty_cashback_percent').maybeSingle();
+      const percent = settings?.value?.percent ?? 0;
+      const cashbackEarned = loyalty_card_id && percent > 0 ? round2((total * percent) / 100) : 0;
       const { data: transaction, error: txErr } = await supabaseAdmin.from('sales_transactions').insert({
-        store_id, staff_user_id, total_amount, discount_amount: discount_amount || 0,
-        payment_method: payment_method || 'cash', payment_note: payment_note || null,
-        loyalty_card_id: loyalty_card_id || null, status: 'completed',
+        store_id, staff_user_id, total_amount: total, discount_amount: discount,
+        payment_method, payment_note: payment_note || null,
+        loyalty_card_id: loyalty_card_id || null,
+        cashback_percent: percent, cashback_earned: cashbackEarned,
+        status: 'completed',
       }).select().single();
       if (txErr) return res.status(400).json({ error: txErr.message });
       const saleId = transaction.transaction_id;
       for (const item of items) {
         const { error: itemErr } = await supabaseAdmin.from('sale_items').insert({
-          transaction_id: saleId, plu_id: item.plu_id || null, plu_name: item.plu_name, quantity: item.quantity,
-          unit_price: item.unit_price, total_price: item.total_price,
+          transaction_id: saleId, plu_id: item.plu_id, plu_name: item.plu_name, quantity: item.quantity,
+          unit_price: item.unit_price, total_price: round2(item.quantity * item.unit_price),
         });
         if (itemErr) {
           console.error('Insert sale item error:', itemErr);
@@ -831,26 +1040,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           await supabaseAdmin.from('inventory').update({ stock_quantity: newQty }).eq('product_id', invItem.product_id);
         }
       }
-      if (loyalty_card_id && discount_amount > 0) {
+      if (loyalty_card_id && discount > 0) {
         const { data: card } = await supabaseAdmin.from('loyalty_cards').select('cashback_balance').eq('card_id', loyalty_card_id).single();
         if (card) {
-          const newBalance = Math.max(0, (card.cashback_balance || 0) - discount_amount);
+          const newBalance = Math.max(0, (card.cashback_balance || 0) - discount);
           await supabaseAdmin.from('loyalty_cards').update({ cashback_balance: newBalance }).eq('card_id', loyalty_card_id);
         }
       }
-      // Accrue loyalty cashback for this purchase
-      if (loyalty_card_id) {
-        const { data: settings } = await supabaseAdmin.from('system_settings').select('value').eq('key', 'loyalty_cashback_percent').single();
-        const percent = settings?.value?.percent ?? 0;
-        if (percent > 0) {
-          const cashbackEarned = (total_amount * percent) / 100;
-          const { data: card } = await supabaseAdmin.from('loyalty_cards').select('cashback_balance').eq('card_id', loyalty_card_id).single();
-          if (card) {
-            await supabaseAdmin.from('loyalty_cards').update({ cashback_balance: (card.cashback_balance || 0) + cashbackEarned }).eq('card_id', loyalty_card_id);
-          }
+      // Accrue loyalty cashback for this purchase (persisted percent/earned)
+      if (loyalty_card_id && cashbackEarned > 0) {
+        const { data: card } = await supabaseAdmin.from('loyalty_cards').select('cashback_balance').eq('card_id', loyalty_card_id).single();
+        if (card) {
+          await supabaseAdmin.from('loyalty_cards').update({ cashback_balance: (card.cashback_balance || 0) + cashbackEarned }).eq('card_id', loyalty_card_id);
         }
       }
-      return res.json({ success: true, transaction });
+      return res.json({
+        success: true,
+        transaction: {
+          ...transaction,
+          sale_items: items.map((i: any) => ({
+            plu_id: i.plu_id,
+            plu_name: i.plu_name,
+            quantity: i.quantity,
+            unit_price: i.unit_price,
+            total_price: round2(i.quantity * i.unit_price),
+          })),
+        },
+      });
     }
 
     // Sales: list
@@ -888,15 +1104,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           await supabaseAdmin.from('loyalty_cards').update({ cashback_balance: (card.cashback_balance || 0) + tx.discount_amount }).eq('card_id', tx.loyalty_card_id);
         }
       }
-      // Subtract cashback that was earned on this sale
+      // Subtract cashback that was earned on this sale (persisted value; fall back to settings for legacy rows)
       if (tx.loyalty_card_id) {
-        const { data: settings } = await supabaseAdmin.from('system_settings').select('value').eq('key', 'loyalty_cashback_percent').single();
-        const percent = settings?.value?.percent ?? 0;
-        if (percent > 0) {
-          const cashbackEarned = (tx.total_amount * percent) / 100;
+        let earned = tx.cashback_earned ?? null;
+        if (earned === null || earned === undefined) {
+          const { data: settings } = await supabaseAdmin.from('system_settings').select('value').eq('key', 'loyalty_cashback_percent').single();
+          const percent = settings?.value?.percent ?? 0;
+          earned = percent > 0 ? (tx.total_amount * percent) / 100 : 0;
+        }
+        if (earned > 0) {
           const { data: card } = await supabaseAdmin.from('loyalty_cards').select('cashback_balance').eq('card_id', tx.loyalty_card_id).single();
           if (card) {
-            await supabaseAdmin.from('loyalty_cards').update({ cashback_balance: Math.max(0, (card.cashback_balance || 0) - cashbackEarned) }).eq('card_id', tx.loyalty_card_id);
+            await supabaseAdmin.from('loyalty_cards').update({ cashback_balance: Math.max(0, (card.cashback_balance || 0) - earned) }).eq('card_id', tx.loyalty_card_id);
           }
         }
       }
@@ -1081,7 +1300,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       try {
         const tenantAdmin = getSupabaseAdmin(tenant.schema_name);
         const { data, error } = await tenantAdmin.from('users')
-          .select('*').eq('role', 'super_user').order('created_at', { ascending: true }).limit(1).maybeSingle();
+          .select('user_id, email, username, full_name, role, is_active, requires_password_change')
+          .eq('role', 'super_user').order('created_at', { ascending: true }).limit(1).maybeSingle();
         if (!error && data) dbRow = data;
       } catch { /* tenant schema may not exist yet */ }
 
@@ -1327,9 +1547,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.json({ tenant_id: tenantId, message: 'Tenant provisioned successfully' });
     }
 
-    // ---- Admin: list super users ----
+    // ---- Admin: list super users (no pin_hash) ----
     if (path[0] === 'admin' && path[1] === 'super-users' && method === 'GET') {
-      const { data, error } = await supabaseAdmin.from('super_users').select('*').order('created_at', { ascending: false });
+      const { data, error } = await supabaseAdmin.from('super_users').select('super_user_id, email, full_name, role, is_active, created_at').order('created_at', { ascending: false });
       if (error) return res.status(400).json({ error: error.message });
       return res.json(data);
     }
@@ -1360,7 +1580,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.json(data);
     }
 
-    // ---- Admin: change PIN (4-8 digits, stored as sha256 hash) ----
+    // ---- Admin: change PIN (4-8 digits, salted hash, own row only) ----
     if (path[0] === 'admin' && path[1] === 'settings' && path[2] === 'change-pin' && method === 'POST') {
       const { user_id, pin } = body;
       if (!user_id || !pin) {
@@ -1369,7 +1589,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!/^\d{4,8}$/.test(String(pin))) {
         return res.status(400).json({ error: 'PIN must be 4-8 digits' });
       }
-      const pinHash = crypto.createHash('sha256').update(String(pin)).digest('hex');
+      if (identity?.kind === 'jwt' && identity.user.id !== user_id) {
+        return res.status(403).json({ error: 'You can only change your own PIN' });
+      }
+      const pinHash = hashPin(String(pin));
       const { error: dbError } = await supabaseAdmin.from('super_users').update({ pin_hash: pinHash }).eq('super_user_id', user_id);
       if (dbError) return res.status(400).json({ error: dbError.message });
       return res.json({ success: true });

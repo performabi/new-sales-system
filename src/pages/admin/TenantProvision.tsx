@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { apiFetch } from '../../lib/api';
 import type { TenantPlan } from '../../types';
 
 export default function AdminTenantProvision() {
@@ -15,7 +16,7 @@ export default function AdminTenantProvision() {
   const [success, setSuccess] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch('/api/admin/plans')
+    apiFetch('/api/admin/plans')
       .then((r) => r.json())
       .then((data) => {
         setPlans(data);
@@ -41,7 +42,7 @@ export default function AdminTenantProvision() {
 
     setSubmitting(true);
     try {
-      const res = await fetch('/api/admin/provision-tenant', {
+      const res = await apiFetch('/api/admin/provision-tenant', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, slug, plan_id: planId, admin_email: adminEmail, admin_name: adminName }),

@@ -2,6 +2,7 @@
 import { useEffect } from 'react';
 import { useAppStore } from '../../store/appStore';
 import DataTable from '../../components/UI/DataTable';
+import { formatCurrency } from '../../lib/formatCurrency';
 
 export default function Inventory() {
   const { inventory, inventoryLoading, fetchInventory } = useAppStore();
@@ -20,7 +21,7 @@ export default function Inventory() {
 
   const tableData = inventory.map((item) => ({
     ...item,
-    price: `£${Number(item.price).toFixed(2)}`,
+    price: formatCurrency(item.price),
     stock_quantity: (
       <span className={item.stock_quantity <= 5 ? 'low-stock' : ''} style={{ fontWeight: '600' }}>
         {item.stock_quantity}

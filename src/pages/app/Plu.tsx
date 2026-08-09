@@ -4,6 +4,7 @@ import { useAppStore } from '../../store/appStore';
 import type { Plu, VatClass } from '../../types';
 import DataTable from '../../components/UI/DataTable';
 import Modal from '../../components/UI/Modal';
+import { formatCurrency, getCurrencySymbol } from '../../lib/formatCurrency';
 
 const VAT_OPTIONS: { value: VatClass; label: string }[] = [
   { value: 'standard',  label: 'Standard (20%)' },
@@ -104,11 +105,11 @@ export default function PluPage() {
   // Effective price for the selected store (for display)
   const effectivePrice = (plu: Plu): string => {
     if (!storeColKey) {
-      return plu.headoffice_price != null ? `£${Number(plu.headoffice_price).toFixed(2)}` : '—';
+      return plu.headoffice_price != null ? formatCurrency(plu.headoffice_price) : '—';
     }
     const storePrice = plu[storeColKey];
-    if (storePrice != null) return `£${Number(storePrice).toFixed(2)}`;
-    return plu.headoffice_price != null ? `£${Number(plu.headoffice_price).toFixed(2)} (HO)` : '—';
+    if (storePrice != null) return formatCurrency(storePrice);
+    return plu.headoffice_price != null ? `${formatCurrency(plu.headoffice_price)} (HO)` : '—';
   };
 
   const openCreateModal = async () => {
@@ -403,7 +404,7 @@ export default function PluPage() {
             <div className="form-group" style={{ marginBottom: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
                 <label className="form-label" htmlFor="plu-ho-price" style={{ margin: 0, fontWeight: 600 }}>
-                  Global Price (£)
+                  Global Price ({getCurrencySymbol()})
                 </label>
                 {/* Question mark trigger for info balloon */}
                 <button

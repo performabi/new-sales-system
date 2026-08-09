@@ -44,6 +44,7 @@ export default function PosStoreSelect() {
   const handleSelect = (store: PosStore) => {
     sessionStorage.setItem('pos_store_id', store.store_id);
     sessionStorage.setItem('pos_store_name', store.name);
+    if (store.store_number) sessionStorage.setItem('pos_store_number', store.store_number);
     navigate('/pos/dashboard', { replace: true });
   };
 

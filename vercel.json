@@ -12,6 +12,10 @@
       "destination": "/api/users/[id]"
     },
     {
+      "source": "/api/users/:id/resend-invite",
+      "destination": "/api/users/[id]"
+    },
+    {
       "source": "/api/users/:id",
       "destination": "/api/users/[id]"
     },

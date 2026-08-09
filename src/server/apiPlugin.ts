@@ -1,9 +1,32 @@
 import { loadEnv, type Plugin } from 'vite';
 import express from 'express';
 import { createClient } from '@supabase/supabase-js';
-import crypto from 'crypto';
+import {
+  HttpError,
+  hashPin,
+  verifyPin,
+  signPosToken,
+  resolveIdentity,
+  identityHasSchema,
+  defaultSchemaFor,
+  isSuperAdminUser,
+  isPublicPath,
+  isPosLoginThrottled,
+  recordPosAttempt,
+  requestIp,
+  type AuthEnv,
+} from './apiAuth';
 
 let currentSchema: string | undefined;
+
+function getEnv(server: any): AuthEnv {
+  const env = loadEnv(server.config.mode, process.cwd(), '');
+  return {
+    supabaseUrl: env.VITE_SUPABASE_URL || '',
+    serviceRole: env.SERVICE_ROLE || '',
+    anonKey: env.VITE_SUPABASE_ANON_KEY || '',
+  };
+}
 
 function getSupabaseAdmin(server: any, schema?: string) {
   const env = loadEnv(server.config.mode, process.cwd(), '');
@@ -64,17 +87,81 @@ export function apiPlugin(): Plugin {
     configureServer(server) {
       const app = express();
       app.use(express.json());
-      app.use((req, _, next) => {
-        currentSchema = (req.query?.tenant_schema as string) || req.body?.tenant_schema;
-        if (!currentSchema && process.env.NODE_ENV !== 'production' && (req.path || '').startsWith('/api/')) {
-          const path = (req.path || '').replace(/^\/api\//, '');
-          const pub = ['public/tenants', 'app/tenant-info', 'pos/admin-login', 'auth/'];
-          const ok = pub.some((p) => path.startsWith(p));
-          if (!ok && !path.startsWith('admin/')) {
-            console.warn(`[api-plugin] request to /api/${path} did not include tenant_schema — routing to default`);
-          }
+      const authEnv = getEnv(server);
+
+      // ---- Auth & tenant-scope middleware (runs before every /api route) ----
+      app.use(async (req, res, next) => {
+        if (!(req.path || '').startsWith('/api/')) {
+          next();
+          return;
         }
-        next();
+        const path = (req.path || '').replace(/^\/api\//, '');
+        const method = (req.method || 'GET').toUpperCase();
+        try {
+          if (isPublicPath(method, path)) {
+            next();
+            return;
+          }
+
+          const identity = await resolveIdentity(req, authEnv);
+          if (!identity) {
+            return res.status(401).json({ error: 'Unauthorized — missing or invalid session' });
+          }
+
+          // Admin routes require a super-admin (or support) browser session;
+          // PIN-verified POS sessions may list tenants/stores to pick where to operate
+          if (path.startsWith('admin/')) {
+            const posListing =
+              identity.kind === 'pos' &&
+              identity.payload.role === 'super_admin' &&
+              method === 'GET' &&
+              (path === 'admin/tenants' || path === 'admin/stores');
+            if (identity.kind !== 'jwt' && !posListing) {
+              return res.status(403).json({ error: 'Super admin session required' });
+            }
+            if (identity.kind === 'jwt') {
+              const isAdmin = await isSuperAdminUser(authEnv, identity.user.id);
+              if (!isAdmin) {
+                return res.status(403).json({ error: 'Super admin session required' });
+              }
+            }
+            (req as any).identity = identity;
+            (req as any).tenantSchema = 'public';
+            currentSchema = 'public';
+            next();
+            return;
+          }
+
+          // Tenant routes: resolve the schema and verify membership
+          const explicit =
+            (req.query?.tenant_schema as string) ||
+            (req.body?.tenant_schema as string) ||
+            '';
+          let schema: string | undefined;
+          if (explicit) {
+            if (!identityHasSchema(identity, explicit)) {
+              return res.status(403).json({ error: 'Not a member of this tenant' });
+            }
+            schema = explicit;
+          } else {
+            schema = defaultSchemaFor(identity);
+          }
+          (req as any).identity = identity;
+          (req as any).tenantSchema = schema;
+          currentSchema = schema;
+          next();
+        } catch (err) {
+          next(err);
+        }
+      });
+
+      // Error handler (catches HttpError from middleware/handlers)
+      app.use((err: any, _req: any, res: any, _next: any) => {
+        if (err instanceof HttpError) {
+          return res.status(err.status).json({ error: err.message });
+        }
+        console.error('API error:', err);
+        return res.status(500).json({ error: 'Internal server error' });
       });
 
       // ---- Users: create (invite via email verification link) ----
@@ -141,7 +228,7 @@ export function apiPlugin(): Plugin {
             return res.status(409).json({ error: 'User is already a member of this tenant' });
           }
 
-          const pinHash = crypto.createHash('sha256').update(pin).digest('hex');
+          const pinHash = hashPin(pin);
 
           const { error: profileError } = await supabaseAdmin.from('users').insert({
             user_id: authUserId,
@@ -188,17 +275,19 @@ export function apiPlugin(): Plugin {
             if (authError) return res.status(400).json({ error: authError.message });
           }
 
-          const pinUpdate = pin ? { pin_hash: crypto.createHash('sha256').update(pin).digest('hex') } : {};
+          const pinUpdate = pin ? { pin_hash: hashPin(pin) } : {};
 
-          const { error: profileError } = await supabaseAdmin.from('users').update({
+          const profileUpdate: any = {
             email,
             username,
             full_name,
             role,
             is_active,
-            assigned_store_id: assigned_store_id || null,
             ...pinUpdate,
-          }).eq('user_id', id);
+          };
+          if ('assigned_store_id' in req.body) profileUpdate.assigned_store_id = assigned_store_id || null;
+
+          const { error: profileError } = await supabaseAdmin.from('users').update(profileUpdate).eq('user_id', id);
 
           if (profileError) return res.status(400).json({ error: profileError.message });
 
@@ -219,7 +308,7 @@ export function apiPlugin(): Plugin {
           const supabaseAdmin = getSupabaseAdmin(server, tenant_schema);
           const { data, error } = await supabaseAdmin
             .from('users')
-            .select('*, stores!assigned_store_id(name)')
+            .select('user_id, email, username, full_name, role, is_active, requires_password_change, assigned_store_id, created_at, created_by, stores!assigned_store_id(name)')
             .order('full_name');
           if (error) return res.status(400).json({ error: error.message });
           return res.json(data);
@@ -253,8 +342,10 @@ export function apiPlugin(): Plugin {
           const { id } = req.params;
           const { newPassword, tenant_schema } = req.body;
           const supabaseAdmin = getSupabaseAdmin(server);
-          const password = newPassword || 'Sales12345';
-          const { error } = await supabaseAdmin.auth.admin.updateUserById(id, { password });
+          if (!newPassword || String(newPassword).length < 8) {
+            return res.status(400).json({ error: 'newPassword is required (min 8 characters)' });
+          }
+          const { error } = await supabaseAdmin.auth.admin.updateUserById(id, { password: String(newPassword) });
           if (error) return res.status(400).json({ error: error.message });
 
           if (tenant_schema) {
@@ -898,12 +989,12 @@ export function apiPlugin(): Plugin {
         }
       });
 
-      // ---- POS: PIN Login ----
+      // ---- POS: PIN Login (salted verify + self-migration, rate-limited, HMAC session token) ----
       app.post('/api/pos/login', async (req, res) => {
         try {
           const { pin } = req.body;
-          if (!pin || pin.length < 4) {
-            return res.status(400).json({ error: 'PIN must be at least 4 digits' });
+          if (!/^\d{4,8}$/.test(String(pin || ''))) {
+            return res.status(400).json({ error: 'PIN must be 4-8 digits' });
           }
 
           const tenantSchema = (req.query.tenant_schema as string) || (req.body?.tenant_schema as string) || '';
@@ -911,26 +1002,57 @@ export function apiPlugin(): Plugin {
             return res.status(400).json({ error: 'tenant_schema is required' });
           }
 
-          const pinHash = crypto.createHash('sha256').update(pin).digest('hex');
+          const identifier = `${tenantSchema}:${String(pin).length}`;
+          if (await isPosLoginThrottled(authEnv, identifier)) {
+            return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+          }
+
+          const tenantCheck = await getSupabaseAdmin(server, 'public')
+            .from('tenants')
+            .select('schema_name')
+            .eq('schema_name', tenantSchema)
+            .maybeSingle();
+          if (!tenantCheck.data) {
+            await recordPosAttempt(authEnv, identifier, false, requestIp(req));
+            return res.status(404).json({ error: 'Tenant not found' });
+          }
+
           const supabaseAdmin = getSupabaseAdmin(server, tenantSchema);
 
-          const { data: users, error } = await supabaseAdmin
+          const { data: users } = await supabaseAdmin
             .from('users')
-            .select('*, stores!assigned_store_id(name)')
-            .eq('pin_hash', pinHash)
+            .select('user_id, username, full_name, role, pin_hash, is_active, assigned_store_id, stores!assigned_store_id(name)')
             .eq('is_active', true);
 
-          if (error) return res.status(500).json({ error: error.message });
-
           if (!users || users.length === 0) {
+            await recordPosAttempt(authEnv, identifier, false, requestIp(req));
             return res.status(401).json({ error: 'Invalid PIN' });
           }
 
-          const user = users[0];
+          const user = users.find((u: any) => verifyPin(String(pin), u.pin_hash).ok);
+          if (!user) {
+            await recordPosAttempt(authEnv, identifier, false, requestIp(req));
+            return res.status(401).json({ error: 'Invalid PIN' });
+          }
+
+          const check = verifyPin(String(pin), user.pin_hash);
+          if (check.upgradedHash) {
+            await supabaseAdmin.from('users').update({ pin_hash: check.upgradedHash }).eq('user_id', user.user_id);
+          }
+
           const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(user.user_id);
           if (authUser?.user && !authUser.user.confirmed_at) {
+            await recordPosAttempt(authEnv, identifier, false, requestIp(req));
             return res.status(401).json({ error: 'Please verify your email before using the terminal' });
           }
+
+          await recordPosAttempt(authEnv, identifier, true, requestIp(req));
+          const posToken = signPosToken(authEnv, {
+            uid: user.user_id,
+            schema: tenantSchema,
+            store_id: user.assigned_store_id || undefined,
+            role: user.role,
+          });
 
           return res.json({
             user: {
@@ -939,8 +1061,10 @@ export function apiPlugin(): Plugin {
               full_name: user.full_name,
               role: user.role,
               assigned_store_id: user.assigned_store_id,
-              assigned_store_name: user.stores?.name || null,
+              assigned_store_name: (user.stores as any)?.name || null,
             },
+            pos_token: posToken,
+            expires_in: 43200,
           });
         } catch (err) {
           console.error('POS login error:', err);
@@ -951,26 +1075,75 @@ export function apiPlugin(): Plugin {
       // ---- POS: Admin PIN Login (checks super_users, accepts store_id) ----
       app.post('/api/pos/admin-login', async (req, res) => {
         try {
-          const { pin, store_id, store_name } = req.body;
-          if (!pin || pin.length < 4) {
-            return res.status(400).json({ error: 'PIN required' });
-          }
-          if (!/^\d{4,8}$/.test(String(pin))) {
+          const { pin, store_id, store_name, tenant_schema, verify_only } = req.body;
+          if (!/^\d{4,8}$/.test(String(pin || ''))) {
             return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+          }
+          if (verify_only) {
+            const identifier = `admin:${String(pin).length}`;
+            if (await isPosLoginThrottled(authEnv, identifier)) {
+              return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+            }
+            const supabasePublic = getSupabaseAdmin(server, 'public');
+            const { data: suList } = await supabasePublic
+              .from('super_users')
+              .select('super_user_id, email, full_name, pin_hash, role')
+              .eq('is_active', true);
+            const su = (suList || []).find((u: any) => verifyPin(String(pin), u.pin_hash).ok);
+            if (!su) {
+              await recordPosAttempt(authEnv, identifier, false, requestIp(req));
+              return res.status(401).json({ error: 'Invalid PIN' });
+            }
+            const check = verifyPin(String(pin), su.pin_hash);
+            if (check.upgradedHash) {
+              await supabasePublic.from('super_users').update({ pin_hash: check.upgradedHash }).eq('super_user_id', su.super_user_id);
+            }
+            await recordPosAttempt(authEnv, identifier, true, requestIp(req));
+            const pendingToken = signPosToken(authEnv, {
+              uid: su.super_user_id,
+              schema: 'public',
+              store_id: 'pending',
+              role: 'super_admin',
+            });
+            return res.json({ verified: true, pending_token: pendingToken, user: { user_id: su.super_user_id, full_name: su.full_name, role: 'super_admin' } });
           }
           if (!store_id) {
             return res.status(400).json({ error: 'store_id required' });
           }
-          const pinHash = crypto.createHash('sha256').update(String(pin)).digest('hex');
+          if (!tenant_schema) {
+            return res.status(400).json({ error: 'tenant_schema required' });
+          }
+
+          const identifier = `admin:${String(pin).length}`;
+          if (await isPosLoginThrottled(authEnv, identifier)) {
+            return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+          }
+
           const supabasePublic = getSupabaseAdmin(server, 'public');
-          const { data: su, error } = await supabasePublic
+          const { data: suList } = await supabasePublic
             .from('super_users')
-            .select('*')
-            .eq('pin_hash', pinHash)
-            .eq('is_active', true)
-            .maybeSingle();
-          if (error) return res.status(500).json({ error: error.message });
-          if (!su) return res.status(401).json({ error: 'Invalid PIN' });
+            .select('super_user_id, email, full_name, pin_hash, role')
+            .eq('is_active', true);
+
+          const su = (suList || []).find((u: any) => verifyPin(String(pin), u.pin_hash).ok);
+          if (!su) {
+            await recordPosAttempt(authEnv, identifier, false, requestIp(req));
+            return res.status(401).json({ error: 'Invalid PIN' });
+          }
+
+          const check = verifyPin(String(pin), su.pin_hash);
+          if (check.upgradedHash) {
+            await supabasePublic.from('super_users').update({ pin_hash: check.upgradedHash }).eq('super_user_id', su.super_user_id);
+          }
+
+          await recordPosAttempt(authEnv, identifier, true, requestIp(req));
+          const posToken = signPosToken(authEnv, {
+            uid: su.super_user_id,
+            schema: tenant_schema,
+            store_id,
+            role: 'super_admin',
+          });
+
           return res.json({
             user: {
               user_id: su.super_user_id,
@@ -980,9 +1153,49 @@ export function apiPlugin(): Plugin {
               assigned_store_id: store_id,
               assigned_store_name: store_name || null,
             },
+            pos_token: posToken,
+            expires_in: 43200,
           });
         } catch (err) {
           console.error('POS admin login error:', err);
+          return res.status(500).json({ error: 'Internal server error' });
+        }
+      });
+
+      // ---- POS: Admin finalize store selection (pending token → full token) ----
+      app.post('/api/pos/admin-finalize', async (req, res) => {
+        try {
+          const { tenant_schema, store_id, store_name } = req.body;
+          if (!tenant_schema || !store_id) {
+            return res.status(400).json({ error: 'tenant_schema and store_id required' });
+          }
+          const identity = (req as any).identity;
+          if (!identity || identity.kind !== 'pos' || identity.payload.role !== 'super_admin' || identity.payload.store_id !== 'pending') {
+            return res.status(403).json({ error: 'Verify your PIN first' });
+          }
+          const tenantAdmin = getSupabaseAdmin(server, tenant_schema);
+          const { data: store } = await tenantAdmin.from('stores').select('store_id, name').eq('store_id', store_id).maybeSingle();
+          if (!store) return res.status(400).json({ error: 'Store not found in this tenant' });
+
+          const posToken = signPosToken(authEnv, {
+            uid: identity.payload.uid,
+            schema: tenant_schema,
+            store_id,
+            role: 'super_admin',
+          });
+          return res.json({
+            user: {
+              user_id: identity.payload.uid,
+              full_name: (req as any).identity?.payload?.full_name || null,
+              role: 'super_admin',
+              assigned_store_id: store_id,
+              assigned_store_name: store_name || store.name,
+            },
+            pos_token: posToken,
+            expires_in: 43200,
+          });
+        } catch (err) {
+          console.error('POS admin finalize error:', err);
           return res.status(500).json({ error: 'Internal server error' });
         }
       });
@@ -1184,12 +1397,21 @@ export function apiPlugin(): Plugin {
         }
       });
 
-      // ---- POS: Clock In ----
+      // ---- POS: Clock In (identity-bound — cannot clock in as another user) ----
       app.post('/api/pos/clock-in', async (req, res) => {
         try {
           const { store_id, user_id } = req.body;
           if (!store_id || !user_id) return res.status(400).json({ error: 'store_id and user_id required' });
+          const identity = (req as any).identity;
+          if (identity?.kind === 'pos' && identity.payload.uid !== user_id) {
+            return res.status(403).json({ error: 'Cannot clock in as another user' });
+          }
+          if (identity?.kind === 'jwt' && identity.user.id !== user_id) {
+            return res.status(403).json({ error: 'Cannot clock in as another user' });
+          }
           const supabaseAdmin = getSupabaseAdmin(server);
+          const { data: store } = await supabaseAdmin.from('stores').select('store_id').eq('store_id', store_id).maybeSingle();
+          if (!store) return res.status(400).json({ error: 'Store not found in this tenant' });
           const { data, error } = await supabaseAdmin
             .from('staff_timesheets')
             .insert({ store_id, user_id, clock_in: new Date().toISOString() })
@@ -1203,11 +1425,18 @@ export function apiPlugin(): Plugin {
         }
       });
 
-      // ---- POS: Clock Out ----
+      // ---- POS: Clock Out (identity-bound) ----
       app.put('/api/pos/clock-out', async (req, res) => {
         try {
           const { user_id } = req.body;
           if (!user_id) return res.status(400).json({ error: 'user_id required' });
+          const identity = (req as any).identity;
+          if (identity?.kind === 'pos' && identity.payload.uid !== user_id) {
+            return res.status(403).json({ error: 'Cannot clock out another user' });
+          }
+          if (identity?.kind === 'jwt' && identity.user.id !== user_id) {
+            return res.status(403).json({ error: 'Cannot clock out another user' });
+          }
           const supabaseAdmin = getSupabaseAdmin(server);
           const { data: open } = await supabaseAdmin
             .from('staff_timesheets')
@@ -1232,11 +1461,18 @@ export function apiPlugin(): Plugin {
         }
       });
 
-      // ---- POS: Clock Status ----
+      // ---- POS: Clock Status (identity-bound) ----
       app.get('/api/pos/clock-status', async (req, res) => {
         try {
           const { user_id } = req.query;
           if (!user_id) return res.status(400).json({ error: 'user_id required' });
+          const identity = (req as any).identity;
+          if (identity?.kind === 'pos' && identity.payload.uid !== user_id) {
+            return res.status(403).json({ error: 'Cannot view another user' });
+          }
+          if (identity?.kind === 'jwt' && identity.user.id !== user_id) {
+            return res.status(403).json({ error: 'Cannot view another user' });
+          }
           const supabaseAdmin = getSupabaseAdmin(server);
           const { data, error } = await supabaseAdmin
             .from('staff_timesheets')
@@ -1477,10 +1713,10 @@ export function apiPlugin(): Plugin {
         }
       });
 
-      // ---- Loyalty Cards: create ----
+      // ---- Loyalty Cards: create (public registration — rate-limited, no balance injection) ----
       app.post('/api/loyalty-cards/create', async (req, res) => {
         try {
-          const { customer_name, phone, email, cashback_balance } = req.body;
+          const { customer_name, phone, email } = req.body;
           if (!customer_name) return res.status(400).json({ error: 'customer_name required' });
           let schema = (req.query.tenant_schema as string) || req.body?.tenant_schema || '';
           const slug = req.body?.tenant_slug || (req.query.tenant_slug as string) || '';
@@ -1490,6 +1726,12 @@ export function apiPlugin(): Plugin {
             schema = tenant.schema_name;
           }
           if (!schema) return res.status(400).json({ error: 'tenant_schema or tenant_slug required' });
+
+          const ipKey = `loyalty-create:${requestIp(req) || 'unknown'}`;
+          if (await isPosLoginThrottled(authEnv, ipKey)) {
+            return res.status(429).json({ error: 'Too many requests. Try again later.' });
+          }
+
           const supabaseAdmin = getSupabaseAdmin(server, schema);
 
           // Generate unique card number: LC-YYYYMMDD-XXXX
@@ -1506,9 +1748,10 @@ export function apiPlugin(): Plugin {
             phone: phone || null,
             email: email || null,
             postcode: req.body.postcode || null,
-            cashback_balance: cashback_balance ?? 0,
+            cashback_balance: 0,
           }).select().single();
           if (error) return res.status(400).json({ error: error.message });
+          await recordPosAttempt(authEnv, ipKey, true, requestIp(req));
           return res.json({ success: true, card: data });
         } catch (err) {
           console.error('Create loyalty card error:', err);
@@ -1557,24 +1800,92 @@ export function apiPlugin(): Plugin {
         }
       });
 
-      // ---- Sales: create ----
+      // ---- Sales: create (server-validated totals, payment allowlist, persisted cashback) ----
+      const PAYMENT_METHODS = ['cash', 'card', 'bank_transfer', 'contactless', 'transfer'];
+
       app.post('/api/sales/create', async (req, res) => {
         try {
           const { store_id, staff_user_id, items, total_amount, discount_amount, payment_method, payment_note, loyalty_card_id } = req.body;
-          if (!store_id || !staff_user_id || !items?.length) {
+          if (!store_id || !staff_user_id || !Array.isArray(items) || items.length === 0) {
             return res.status(400).json({ error: 'store_id, staff_user_id, and items required' });
           }
+          if (!items.every((i: any) => i && typeof i.plu_id === 'string' && typeof i.plu_name === 'string' && typeof i.quantity === 'number' && i.quantity > 0 && typeof i.unit_price === 'number')) {
+            return res.status(400).json({ error: 'Invalid item payload' });
+          }
+          if (!PAYMENT_METHODS.includes(payment_method || 'cash')) {
+            return res.status(400).json({ error: `payment_method must be one of: ${PAYMENT_METHODS.join(', ')}` });
+          }
+
           const supabaseAdmin = getSupabaseAdmin(server);
+
+          // POS operator binding: staff tokens can only record their own sales
+          const identity = (req as any).identity;
+          if (identity?.kind === 'pos' && identity.payload.role !== 'super_admin' && identity.payload.uid !== staff_user_id) {
+            return res.status(403).json({ error: 'Sale must be recorded against the signed-in staff member' });
+          }
+
+          // Validate store exists in this tenant
+          const { data: store } = await supabaseAdmin.from('stores').select('store_id, store_number').eq('store_id', store_id).maybeSingle();
+          if (!store) return res.status(400).json({ error: 'Store not found in this tenant' });
+
+          const round2 = (n: number) => Math.round(n * 100) / 100;
+
+          // Server-side price validation: every line must match the PLU's configured price
+          const pluIds = [...new Set(items.map((i: any) => i.plu_id))];
+          const { data: pluRows } = await supabaseAdmin.from('plu').select('*').in('plu_id', pluIds);
+          const pluMap = new Map((pluRows ?? []).map((p: any) => [p.plu_id, p]));
+          for (const item of items) {
+            const plu = pluMap.get(item.plu_id);
+            if (!plu) {
+              return res.status(400).json({ error: `Unknown PLU: ${item.plu_name}` });
+            }
+            const storePrice = Number(plu[`store_${store.store_number}`] ?? 0);
+            const expected = storePrice > 0 ? storePrice : Number(plu.headoffice_price ?? 0);
+            if (round2(Number(item.unit_price)) !== round2(expected)) {
+              return res.status(400).json({ error: `Price mismatch for ${item.plu_name}: expected ${expected}` });
+            }
+          }
+
+          // Validate staff: active tenant user (or super-admin override) with access to this store
+          const { data: staff } = await supabaseAdmin.from('users')
+            .select('user_id, role, is_active, assigned_store_id')
+            .eq('user_id', staff_user_id)
+            .maybeSingle();
+          if (!staff || !staff.is_active) {
+            return res.status(401).json({ error: 'Invalid staff member' });
+          }
+          if (staff.role !== 'super_admin' && staff.assigned_store_id !== store_id) {
+            return res.status(403).json({ error: 'Staff member is not assigned to this store' });
+          }
+
+          // Compute totals server-side (round to 2dp)
+          const computedTotal = round2(items.reduce((sum: number, i: any) => sum + round2(i.quantity * i.unit_price), 0));
+          const discount = Math.min(round2(Number(discount_amount) || 0), computedTotal);
+          const total = round2(computedTotal - discount);
+          if (Number(total_amount) !== total) {
+            return res.status(400).json({ error: 'total_amount does not match computed total' });
+          }
+          if (discount > 0 && !loyalty_card_id) {
+            return res.status(400).json({ error: 'Discount requires a loyalty card' });
+          }
+
+          // Resolve cashback percent (persist with the transaction for accurate voiding)
+          const { data: settings } = await supabaseAdmin.from('system_settings')
+            .select('value').eq('key', 'loyalty_cashback_percent').maybeSingle();
+          const percent = settings?.value?.percent ?? 0;
+          const cashbackEarned = loyalty_card_id && percent > 0 ? round2((total * percent) / 100) : 0;
 
           // Create transaction
           const { data: transaction, error: txErr } = await supabaseAdmin.from('sales_transactions').insert({
             store_id,
             staff_user_id,
-            total_amount,
-            discount_amount: discount_amount || 0,
-            payment_method: payment_method || 'cash',
+            total_amount: total,
+            discount_amount: discount,
+            payment_method,
             payment_note: payment_note || null,
             loyalty_card_id: loyalty_card_id || null,
+            cashback_percent: percent,
+            cashback_earned: cashbackEarned,
             status: 'completed',
           }).select().single();
           if (txErr) return res.status(400).json({ error: txErr.message });
@@ -1585,11 +1896,11 @@ export function apiPlugin(): Plugin {
           for (const item of items) {
             const { error: itemErr } = await supabaseAdmin.from('sale_items').insert({
               transaction_id: saleId,
-              plu_id: item.plu_id || null,
+              plu_id: item.plu_id,
               plu_name: item.plu_name,
               quantity: item.quantity,
               unit_price: item.unit_price,
-              total_price: item.total_price,
+              total_price: round2(item.quantity * item.unit_price),
             });
             if (itemErr) {
               console.error('Insert sale item error:', itemErr);
@@ -1607,34 +1918,40 @@ export function apiPlugin(): Plugin {
             }
           }
 
-          // Deduct loyalty cashback if used
-          if (loyalty_card_id && discount_amount > 0) {
+          // Deduct loyalty cashback if used (server-validated discount amount)
+          if (loyalty_card_id && discount > 0) {
             const { data: card } = await supabaseAdmin.from('loyalty_cards')
               .select('cashback_balance').eq('card_id', loyalty_card_id).single();
             if (card) {
-              const newBalance = Math.max(0, (card.cashback_balance || 0) - discount_amount);
+              const newBalance = Math.max(0, (card.cashback_balance || 0) - discount);
               await supabaseAdmin.from('loyalty_cards').update({ cashback_balance: newBalance }).eq('card_id', loyalty_card_id);
             }
           }
 
-          // Accrue loyalty cashback for this purchase
-          if (loyalty_card_id) {
-            const { data: settings } = await supabaseAdmin.from('system_settings')
-              .select('value').eq('key', 'loyalty_cashback_percent').single();
-            const percent = settings?.value?.percent ?? 0;
-            if (percent > 0) {
-              const cashbackEarned = (total_amount * percent) / 100;
-              const { data: card } = await supabaseAdmin.from('loyalty_cards')
-                .select('cashback_balance').eq('card_id', loyalty_card_id).single();
-              if (card) {
-                await supabaseAdmin.from('loyalty_cards')
-                  .update({ cashback_balance: (card.cashback_balance || 0) + cashbackEarned })
-                  .eq('card_id', loyalty_card_id);
-              }
+          // Accrue loyalty cashback for this purchase (using persisted percent/earned)
+          if (loyalty_card_id && cashbackEarned > 0) {
+            const { data: card } = await supabaseAdmin.from('loyalty_cards')
+              .select('cashback_balance').eq('card_id', loyalty_card_id).single();
+            if (card) {
+              await supabaseAdmin.from('loyalty_cards')
+                .update({ cashback_balance: (card.cashback_balance || 0) + cashbackEarned })
+                .eq('card_id', loyalty_card_id);
             }
           }
 
-          return res.json({ success: true, transaction });
+          return res.json({
+            success: true,
+            transaction: {
+              ...transaction,
+              sale_items: items.map((i: any) => ({
+                plu_id: i.plu_id,
+                plu_name: i.plu_name,
+                quantity: i.quantity,
+                unit_price: i.unit_price,
+                total_price: round2(i.quantity * i.unit_price),
+              })),
+            },
+          });
         } catch (err) {
           console.error('Create sale error:', err);
           return res.status(500).json({ error: 'Internal server error' });
@@ -1696,15 +2013,18 @@ export function apiPlugin(): Plugin {
             }
           }
 
-          // Subtract cashback that was earned on this sale
+          // Subtract cashback that was earned on this sale (persisted value; fall back to settings for legacy rows)
           if (tx.loyalty_card_id) {
-            const { data: settings } = await supabaseAdmin.from('system_settings').select('value').eq('key', 'loyalty_cashback_percent').single();
-            const percent = settings?.value?.percent ?? 0;
-            if (percent > 0) {
-              const cashbackEarned = (tx.total_amount * percent) / 100;
+            let earned = tx.cashback_earned ?? null;
+            if (earned === null || earned === undefined) {
+              const { data: settings } = await supabaseAdmin.from('system_settings').select('value').eq('key', 'loyalty_cashback_percent').single();
+              const percent = settings?.value?.percent ?? 0;
+              earned = percent > 0 ? (tx.total_amount * percent) / 100 : 0;
+            }
+            if (earned > 0) {
               const { data: card } = await supabaseAdmin.from('loyalty_cards').select('cashback_balance').eq('card_id', tx.loyalty_card_id).single();
               if (card) {
-                await supabaseAdmin.from('loyalty_cards').update({ cashback_balance: Math.max(0, (card.cashback_balance || 0) - cashbackEarned) }).eq('card_id', tx.loyalty_card_id);
+                await supabaseAdmin.from('loyalty_cards').update({ cashback_balance: Math.max(0, (card.cashback_balance || 0) - earned) }).eq('card_id', tx.loyalty_card_id);
               }
             }
           }
@@ -1963,7 +2283,8 @@ export function apiPlugin(): Plugin {
           try {
             const tenantAdmin = getSupabaseAdmin(server, tenant.schema_name);
             const { data, error } = await tenantAdmin.from('users')
-              .select('*').eq('role', 'super_user').order('created_at', { ascending: true }).limit(1).maybeSingle();
+              .select('user_id, email, username, full_name, role, is_active, requires_password_change')
+              .eq('role', 'super_user').order('created_at', { ascending: true }).limit(1).maybeSingle();
             if (!error && data) dbRow = data;
           } catch { /* tenant schema may not exist yet */ }
 
@@ -2255,7 +2576,7 @@ export function apiPlugin(): Plugin {
       app.get('/api/admin/super-users', async (_req, res) => {
         try {
           const supabaseAdmin = getSupabaseAdmin(server, 'public');
-          const { data, error } = await supabaseAdmin.from('super_users').select('*').order('created_at', { ascending: false });
+          const { data, error } = await supabaseAdmin.from('super_users').select('super_user_id, email, full_name, role, is_active, created_at').order('created_at', { ascending: false });
           if (error) return res.status(400).json({ error: error.message });
           return res.json(data);
         } catch (err) {
@@ -2307,7 +2628,7 @@ export function apiPlugin(): Plugin {
         }
       });
 
-      // ---- Admin: change PIN (4-8 digits, stored as sha256 hash) ----
+      // ---- Admin: change PIN (4-8 digits, salted hash) ----
       app.post('/api/admin/settings/change-pin', async (req, res) => {
         try {
           const { user_id, pin } = req.body;
@@ -2317,7 +2638,11 @@ export function apiPlugin(): Plugin {
           if (!/^\d{4,8}$/.test(String(pin))) {
             return res.status(400).json({ error: 'PIN must be 4-8 digits' });
           }
-          const pinHash = crypto.createHash('sha256').update(String(pin)).digest('hex');
+          const identity = (req as any).identity;
+          if (identity?.kind === 'jwt' && identity.user.id !== user_id) {
+            return res.status(403).json({ error: 'You can only change your own PIN' });
+          }
+          const pinHash = hashPin(String(pin));
           const supabaseAdmin = getSupabaseAdmin(server, 'public');
           const { error: dbError } = await supabaseAdmin.from('super_users').update({ pin_hash: pinHash }).eq('super_user_id', user_id);
           if (dbError) return res.status(400).json({ error: dbError.message });

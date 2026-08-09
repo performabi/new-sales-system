@@ -138,11 +138,16 @@ export default function Users() {
         </button>
         <button
           className="btn btn-sm btn-ghost"
-          title="Reset Password (to Sales12345)"
+          title="Reset Password"
           onClick={async (e) => {
             e.stopPropagation();
+            const newPassword = prompt(`Set a new password for "${u.username}":`);
+            if (!newPassword || newPassword.length < 8) {
+              alert('Password must be at least 8 characters');
+              return;
+            }
             if (confirm(`Reset password for "${u.username}"?`)) {
-              await useAppStore.getState().resetUserPassword(u.user_id);
+              await useAppStore.getState().resetUserPassword(u.user_id, newPassword);
             }
           }}
           disabled={u.role === 'super_user'}
@@ -236,12 +241,12 @@ export default function Users() {
               />
             </div>
             <div className="form-group">
-              <label className="form-label" htmlFor="pin">4-Digit PIN</label>
+              <label className="form-label" htmlFor="pin">4-8 Digit PIN</label>
               <input
                 id="pin"
                 type="text"
-                pattern="[0-9]{4}"
-                maxLength={4}
+                pattern="[0-9]{4,8}"
+                maxLength={8}
                 className="form-input"
                 value={pin}
                 onChange={(e) => setPin(e.target.value.replace(/[^0-9]/g, ''))}

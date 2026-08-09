@@ -58,7 +58,7 @@ export default function AdminStoreSelect() {
       const res = await fetch('/api/pos/admin-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin, store_id: 'pending', store_name: '' }),
+        body: JSON.stringify({ pin, verify_only: true }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -67,9 +67,11 @@ export default function AdminStoreSelect() {
         setSubmitting(false);
         return;
       }
-      sessionStorage.setItem('pos_pin', pin);
+      if (data.pending_token) {
+        sessionStorage.setItem('pos_token', data.pending_token);
+      }
       sessionStorage.setItem('pos_user_id', data.user.user_id);
-      sessionStorage.setItem('pos_user_name', data.user.full_name);
+      sessionStorage.setItem('pos_user_name', data.user.full_name || '');
       sessionStorage.setItem('pos_user_role', data.user.role);
       setPin('');
       setSubmitting(false);
@@ -82,7 +84,11 @@ export default function AdminStoreSelect() {
 
   const fetchTenants = async () => {
     try {
-      const res = await fetch('/api/admin/tenants');
+      const headers = new Headers();
+      const posToken = sessionStorage.getItem('pos_token');
+      if (posToken) headers.set('X-POS-Token', posToken);
+      const res = await fetch('/api/admin/tenants', { headers });
+      if (!res.ok) throw new Error('Unauthorized');
       const data = await res.json();
       setTenants(data);
       setStep('store');
@@ -101,7 +107,10 @@ export default function AdminStoreSelect() {
     setStoreError(null);
     try {
       const schema = `tenant_${tenant.tenant_id.replace(/-/g, '')}`;
-      const res = await fetch(`/api/admin/stores?schema=${encodeURIComponent(schema)}`);
+      const headers = new Headers();
+      const posToken = sessionStorage.getItem('pos_token');
+      if (posToken) headers.set('X-POS-Token', posToken);
+      const res = await fetch(`/api/admin/stores?schema=${encodeURIComponent(schema)}`, { headers });
       if (!res.ok) throw new Error('Failed to load stores');
       const data = await res.json();
       setStores(data);
@@ -113,22 +122,29 @@ export default function AdminStoreSelect() {
   };
 
   const handleStoreSelect = async (store: PosStore) => {
-    const savedPin = sessionStorage.getItem('pos_pin');
-    if (!savedPin) { setStep('pin'); return; }
+    if (!selectedTenant) { setStep('pin'); return; }
     try {
-      const res = await fetch('/api/pos/admin-login', {
+      const schema = `tenant_${selectedTenant.tenant_id.replace(/-/g, '')}`;
+      const headers = new Headers({ 'Content-Type': 'application/json' });
+      const posToken = sessionStorage.getItem('pos_token');
+      if (posToken) headers.set('X-POS-Token', posToken);
+      const res = await fetch('/api/pos/admin-finalize', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: savedPin, store_id: store.store_id, store_name: store.name }),
+        headers,
+        body: JSON.stringify({ tenant_schema: schema, store_id: store.store_id, store_name: store.name }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error);
+      if (!res.ok) throw new Error(data.error || 'Failed to select store');
+      if (data.pos_token) {
+        sessionStorage.setItem('pos_token', data.pos_token);
+      }
       sessionStorage.setItem('pos_store_id', data.user.assigned_store_id);
       sessionStorage.setItem('pos_store_name', data.user.assigned_store_name);
-      sessionStorage.removeItem('pos_pin');
+      if (store.store_number) sessionStorage.setItem('pos_store_number', store.store_number);
       navigate('/pos/dashboard', { replace: true });
     } catch {
       setStoreError('Session expired, please re-enter PIN');
+      sessionStorage.removeItem('pos_token');
       setStep('pin');
     }
   };

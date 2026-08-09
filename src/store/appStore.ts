@@ -18,12 +18,12 @@ function apiFetch(path: string, options?: RequestInit) {
   const schema = getActiveSchema();
   const separator = path.includes('?') ? '&' : '?';
   const url = schema ? `${path}${separator}tenant_schema=${encodeURIComponent(schema)}` : path;
-  return fetch(url, options);
-}
-
-function getSchemaParam(): string {
-  const schema = getActiveSchema();
-  return schema ? `tenant_schema=${encodeURIComponent(schema)}` : '';
+  const headers = new Headers(options?.headers);
+  const token = useAuthStore.getState().session?.access_token;
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  const posToken = typeof sessionStorage !== 'undefined' ? sessionStorage.getItem('pos_token') : null;
+  if (posToken) headers.set('X-POS-Token', posToken);
+  return fetch(url, { ...options, headers });
 }
 
 export interface LogEntry {
@@ -103,7 +103,6 @@ interface AppState {
   exportLogCsv: () => void;
 
   // PLU Scheduled Changes
-  schedulePluChange: (pluId: string, payload: Record<string, any>, scheduledAt: string, createdBy: string) => Promise<{ error: string | null }>;
   applyDueScheduledChanges: () => Promise<void>;
 
   // Suppliers
@@ -192,12 +191,12 @@ interface AppState {
   fetchUnseenNotifications: (storeId: string) => Promise<void>;
 
   // Basket / Cart
-  basketTabs: any[];
+  basketTabs: BasketTab[];
   activeTabId: string | null;
   openNewBasket: (staffUserId: string, staffName: string) => void;
   switchBasket: (tabId: string) => void;
   closeBasket: (tabId: string) => void;
-  addToBasket: (item: any) => void;
+  addToBasket: (item: BasketItem) => void;
   updateBasketItemQty: (pluId: string, qty: number) => void;
   removeFromBasket: (pluId: string) => void;
   setBasketDiscount: (tabId: string, amount: number) => void;
@@ -214,6 +213,27 @@ interface AppState {
 
 let toastId = 0;
 let logId = 0;
+
+export interface BasketItem {
+  plu_id: string;
+  plu_number: string;
+  name: string;
+  quantity: number;
+  unit_price: number;
+  total_price: number;
+  uses_scale: boolean;
+}
+
+export interface BasketTab {
+  tabId: string;
+  staffUserId: string;
+  staffName: string;
+  items: BasketItem[];
+  discount: number;
+  loyaltyCardId: string | null;
+  loyaltyCustomerName: string | null;
+  loyaltyCashback: number;
+}
 
 export const useAppStore = create<AppState>((set, get) => ({
   // ---------- Sidebar ----------
@@ -539,7 +559,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           action: 'edit',
         });
       }
-      get().addToast('success', 'Password reset to Sales12345');
+      get().addToast('success', 'Password reset successfully');
       return { error: null };
     } catch (err) {
       get().addToast('error', (err as Error).message);
@@ -955,21 +975,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   // ---------- PLU Scheduled Changes ----------
-  schedulePluChange: async (pluId, payload, scheduledAt, createdBy) => {
-    try {
-      const res = await apiFetch('/api/plu_scheduled_changes', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plu_id: pluId, payload, scheduled_at: scheduledAt, created_by: createdBy }),
-      });
-      const result = await res.json();
-      if (!res.ok) return { error: result.error || 'Failed to schedule change' };
-      return { error: null };
-    } catch (err) {
-      return { error: (err as Error).message };
-    }
-  },
-
   applyDueScheduledChanges: async () => {
     try {
       const res = await apiFetch('/api/plu_scheduled_changes/due');
@@ -1343,7 +1348,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       let url = `/api/checklists?store_id=${encodeURIComponent(storeId)}`;
       if (type) url += `&type=${encodeURIComponent(type)}`;
-      const res = await fetch(url.startsWith('/api/') ? url + (url.includes('?') ? '&' : '?') + getSchemaParam() : url);
+      const res = await apiFetch(url);
       if (!res.ok) throw new Error('Failed to fetch checklists');
       const data = await res.json();
       set({ checklists: data });
@@ -1546,15 +1551,21 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   updateCashbackPercent: async (percent) => {
     try {
-      await apiFetch('/api/settings/loyalty-cashback-percent', {
+      const res = await apiFetch('/api/settings/loyalty-cashback-percent', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ percent }),
       });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({ error: 'Failed to update cashback percentage' }));
+        get().addToast('error', errData.error || 'Failed to update cashback percentage');
+        return;
+      }
       set({ cashbackPercent: percent });
       get().addToast('success', 'Cashback percentage updated');
     } catch (err) {
       console.error('updateCashbackPercent error:', err);
+      get().addToast('error', 'Failed to update cashback percentage');
     }
   },
 
@@ -1708,7 +1719,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       let url = `/api/sales?store_id=${storeId}`;
       if (date) url += `&date=${date}`;
-      const res = await fetch(url + '&' + getSchemaParam());
+      const res = await apiFetch(url);
       if (res.ok) {
         const data = await res.json();
         set({ saleTransactions: data });

@@ -62,29 +62,29 @@ export default function Till() {
       fetchPluCategories();
       fetchPlus();
     }
-    const scale = deviceManager.getScale();
-    if (scale) {
-      const read = async () => {
-        const w = await scale.readWeight();
-        if (w !== null) setScaleWeight(w);
-      };
-      read();
-      const interval = setInterval(read, 2000);
-      return () => clearInterval(interval);
-    }
     apiFetch('/api/settings/currency')
       .then((r) => r.json())
       .then((c) => setCurrencyConfig(c))
       .catch(() => {});
+    const scale = deviceManager.getScale();
+    if (!scale) return;
+    const read = async () => {
+      const w = await scale.readWeight();
+      if (w !== null) setScaleWeight(w);
+    };
+    read();
+    const interval = setInterval(read, 2000);
+    return () => clearInterval(interval);
   }, [storeId]);
 
   const getEffectivePrice = useCallback((plu: Plu): number => {
-    if (!storeId) return plu.headoffice_price ?? 0;
-    const storeKey = `store_${storeId}` as keyof Plu;
+    const storeNumber = sessionStorage.getItem('pos_store_number');
+    if (!storeNumber) return plu.headoffice_price ?? 0;
+    const storeKey = `store_${storeNumber}` as keyof Plu;
     const storePrice = plu[storeKey];
     if (typeof storePrice === 'number' && storePrice > 0) return storePrice;
     return plu.headoffice_price ?? 0;
-  }, [storeId]);
+  }, []);
 
   const filteredPlu = plusItems.filter((plu) => {
     if (activeCategory && plu.category_id !== activeCategory) return false;
@@ -232,6 +232,11 @@ export default function Till() {
 
   const symbol = currencyConfig?.symbol || '£';
 
+  const activeTab = basketTabs.find((t) => t.tabId === activeTabId);
+  const paymentTotal = activeTab
+    ? Math.max(0, activeTab.items.reduce((sum: number, i: any) => sum + i.unit_price * i.quantity, 0) - (activeTab.discount || 0))
+    : 0;
+
   return (
     <div style={{
       display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden',
@@ -333,7 +338,7 @@ export default function Till() {
         isOpen={showPayment}
         onClose={() => setShowPayment(false)}
         onPay={handlePay}
-        total={basketTabs.find((t) => t.tabId === activeTabId)?.items.reduce((s: number, i: any) => s + i.unit_price * i.quantity, 0) - (basketTabs.find((t) => t.tabId === activeTabId)?.discount || 0) || 0}
+        total={paymentTotal}
         currencySymbol={symbol}
       />
 

@@ -105,6 +105,8 @@ BEGIN
 
     EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%s_inventory_barcode ON %I.inventory(barcode_qr)',
       replace(v_schema, 'tenant_', ''), v_schema);
+    EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%s_inventory_store_name ON %I.inventory(store_id, name)',
+      replace(v_schema, 'tenant_', ''), v_schema);
 
     -- =============================================
     -- 4. PLU CATEGORIES
@@ -280,17 +282,39 @@ BEGIN
       CREATE TABLE IF NOT EXISTS %I.sales_transactions (
         transaction_id  UUID           PRIMARY KEY DEFAULT gen_random_uuid(),
         store_id        UUID           NOT NULL REFERENCES %I.stores(store_id) ON DELETE RESTRICT,
-        staff_user_id   UUID           NOT NULL,
+        staff_user_id   UUID           REFERENCES %I.users(user_id) ON DELETE SET NULL,
         total_amount    NUMERIC(12,2)  NOT NULL DEFAULT 0.00,
         discount_amount NUMERIC(12,2)  NOT NULL DEFAULT 0.00,
         payment_method  TEXT           NOT NULL DEFAULT ''cash'',
         payment_note    TEXT,
         loyalty_card_id UUID           REFERENCES %I.loyalty_cards(card_id) ON DELETE SET NULL,
         status          TEXT           NOT NULL DEFAULT ''completed'',
+        cashback_percent NUMERIC(5,2),
+        cashback_earned  NUMERIC(10,2) NOT NULL DEFAULT 0.00,
         created_at      TIMESTAMPTZ    NOT NULL DEFAULT now()
-      )', v_schema, v_schema, v_schema);
+      )', v_schema, v_schema, v_schema, v_schema);
 
     EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%s_sales_tx_store ON %I.sales_transactions(store_id, created_at DESC)', replace(v_schema, 'tenant_', ''), v_schema);
+
+    -- Repair staff FK on existing sales_transactions tables
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_schema = v_schema AND table_name = 'sales_transactions' AND column_name = 'staff_user_id'
+                 AND is_nullable = 'NO') THEN
+      EXECUTE format('ALTER TABLE %I.sales_transactions ALTER COLUMN staff_user_id DROP NOT NULL', v_schema);
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.table_constraints
+      WHERE constraint_schema = v_schema AND table_name = 'sales_transactions'
+        AND constraint_name = 'fk_sales_tx_staff'
+    ) THEN
+      EXECUTE format('
+        ALTER TABLE %I.sales_transactions
+          ADD CONSTRAINT fk_sales_tx_staff
+          FOREIGN KEY (staff_user_id) REFERENCES %I.users(user_id) ON DELETE SET NULL',
+        v_schema, v_schema);
+    END IF;
+    EXECUTE format('ALTER TABLE %I.sales_transactions ADD COLUMN IF NOT EXISTS cashback_percent NUMERIC(5,2)', v_schema);
+    EXECUTE format('ALTER TABLE %I.sales_transactions ADD COLUMN IF NOT EXISTS cashback_earned NUMERIC(10,2) NOT NULL DEFAULT 0.00', v_schema);
 
     -- =============================================
     -- 14. SALE ITEMS
@@ -333,11 +357,11 @@ BEGIN
       CREATE TABLE IF NOT EXISTS %I.staff_timesheets (
         timesheet_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
         store_id     UUID NOT NULL REFERENCES %I.stores(store_id) ON DELETE CASCADE,
-        user_id      UUID NOT NULL,
+        user_id      UUID NOT NULL REFERENCES %I.users(user_id) ON DELETE CASCADE,
         clock_in     TIMESTAMPTZ NOT NULL DEFAULT now(),
         clock_out    TIMESTAMPTZ,
         created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
-      )', v_schema, v_schema);
+      )', v_schema, v_schema, v_schema);
 
     EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%s_staff_timesheets_user_date ON %I.staff_timesheets(user_id, clock_in DESC)', replace(v_schema, 'tenant_', ''), v_schema);
 
@@ -384,9 +408,9 @@ BEGIN
         body            TEXT NOT NULL,
         store_id        UUID REFERENCES %I.stores(store_id) ON DELETE CASCADE,
         created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-        created_by      UUID,
+        created_by      UUID REFERENCES %I.users(user_id) ON DELETE SET NULL,
         sent_at         TIMESTAMPTZ
-      )', v_schema, v_schema);
+      )', v_schema, v_schema, v_schema);
 
     EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%s_loyalty_notifications_store ON %I.loyalty_notifications(store_id)', replace(v_schema, 'tenant_', ''), v_schema);
     EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%s_loyalty_notifications_sent ON %I.loyalty_notifications(sent_at)', replace(v_schema, 'tenant_', ''), v_schema);
@@ -432,7 +456,32 @@ BEGIN
     EXECUTE format('ALTER TABLE %I.item_sizing           ENABLE ROW LEVEL SECURITY', v_schema);
     EXECUTE format('ALTER TABLE %I.staff_timesheets      ENABLE ROW LEVEL SECURITY', v_schema);
     EXECUTE format('ALTER TABLE %I.store_checklists      ENABLE ROW LEVEL SECURITY', v_schema);
+    EXECUTE format('ALTER TABLE %I.system_settings      ENABLE ROW LEVEL SECURITY', v_schema);
     EXECUTE format('ALTER TABLE %I.loyalty_notifications ENABLE ROW LEVEL SECURITY', v_schema);
+
+    -- Repair FKs missing on pre-existing tables
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.table_constraints
+      WHERE constraint_schema = v_schema AND table_name = 'staff_timesheets'
+        AND constraint_name = 'fk_timesheets_user'
+    ) THEN
+      EXECUTE format('
+        ALTER TABLE %I.staff_timesheets
+          ADD CONSTRAINT fk_timesheets_user
+          FOREIGN KEY (user_id) REFERENCES %I.users(user_id) ON DELETE CASCADE',
+        v_schema, v_schema);
+    END IF;
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.table_constraints
+      WHERE constraint_schema = v_schema AND table_name = 'loyalty_notifications'
+        AND constraint_name = 'fk_loyalty_notif_created_by'
+    ) THEN
+      EXECUTE format('
+        ALTER TABLE %I.loyalty_notifications
+          ADD CONSTRAINT fk_loyalty_notif_created_by
+          FOREIGN KEY (created_by) REFERENCES %I.users(user_id) ON DELETE SET NULL',
+        v_schema, v_schema);
+    END IF;
 
     -- RLS policies (safe to recreate)
     EXECUTE format('DROP POLICY IF EXISTS "stores_admin_full_access" ON %I.stores', v_schema);
@@ -491,7 +540,7 @@ BEGIN
     EXECUTE format('DROP POLICY IF EXISTS "plu_categories_user_read" ON %I.plu_categories', v_schema);
     EXECUTE format('
       CREATE POLICY "plu_categories_user_read" ON %I.plu_categories
-        FOR SELECT USING (true)',
+        FOR SELECT TO authenticated USING (true)',
       v_schema);
 
     EXECUTE format('DROP POLICY IF EXISTS "plu_admin_full_access" ON %I.plu', v_schema);
@@ -504,7 +553,7 @@ BEGIN
     EXECUTE format('DROP POLICY IF EXISTS "plu_user_read" ON %I.plu', v_schema);
     EXECUTE format('
       CREATE POLICY "plu_user_read" ON %I.plu
-        FOR SELECT USING (true)',
+        FOR SELECT TO authenticated USING (true)',
       v_schema);
 
     EXECUTE format('DROP POLICY IF EXISTS "logbook_admin_read" ON %I.logbook', v_schema);
@@ -589,6 +638,19 @@ BEGIN
         WITH CHECK (%I.get_user_role() IN (''super_user'', ''admin''))',
       v_schema, v_schema, v_schema);
 
+    EXECUTE format('DROP POLICY IF EXISTS "item_sizing_user_read" ON %I.item_sizing', v_schema);
+    EXECUTE format('
+      CREATE POLICY "item_sizing_user_read" ON %I.item_sizing
+        FOR SELECT TO authenticated USING (true)',
+      v_schema);
+
+    EXECUTE format('DROP POLICY IF EXISTS "system_settings_admin_all" ON %I.system_settings', v_schema);
+    EXECUTE format('
+      CREATE POLICY "system_settings_admin_all" ON %I.system_settings
+        FOR ALL USING (%I.get_user_role() IN (''super_user'', ''admin''))
+        WITH CHECK (%I.get_user_role() IN (''super_user'', ''admin''))',
+      v_schema, v_schema, v_schema);
+
     EXECUTE format('DROP POLICY IF EXISTS "loyalty_cards_admin_all" ON %I.loyalty_cards', v_schema);
     EXECUTE format('
       CREATE POLICY "loyalty_cards_admin_all" ON %I.loyalty_cards
@@ -608,6 +670,7 @@ BEGIN
     -- =============================================
     EXECUTE format('GRANT USAGE ON SCHEMA %I TO anon, authenticated, service_role', v_schema);
     EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO anon, authenticated, service_role', v_schema);
+    EXECUTE format('REVOKE INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I FROM anon', v_schema);
     EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO anon, authenticated, service_role', v_schema);
     EXECUTE format('GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA %I TO anon, authenticated, service_role', v_schema);
 

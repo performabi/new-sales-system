@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../../store/authStore';
+import { apiFetch } from '../../lib/api';
 import type { TenantPlan } from '../../types';
 
 export default function AdminPlans() {
@@ -8,7 +9,7 @@ export default function AdminPlans() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch('/api/admin/plans')
+    apiFetch('/api/admin/plans')
       .then((r) => r.json())
       .then((data) => {
         setPlans(data);

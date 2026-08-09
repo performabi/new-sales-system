@@ -139,6 +139,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       console.warn('Sign out error:', err);
     }
     sessionStorage.removeItem('pos_session');
+    sessionStorage.removeItem('pos_token');
     sessionStorage.removeItem('pos_store_id');
     sessionStorage.removeItem('pos_store_name');
     set({ session: null, user: null, profile: null, superUser: null, userType: null, activeTenantSchema: null, pendingTenants: null });
@@ -218,7 +219,10 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       });
       let slug: string | null = null;
       try {
-        const res = await fetch(`/api/app/tenant-info?tenant_schema=${encodeURIComponent(schema)}`);
+        const headers = new Headers();
+        const accessToken = get().session?.access_token;
+        if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
+        const res = await fetch(`/api/app/tenant-info?tenant_schema=${encodeURIComponent(schema)}`, { headers });
         if (res.ok) {
           const tenant = await res.json();
           slug = (tenant.slug as string) || null;
@@ -246,7 +250,7 @@ async function resolveUserType(
       const { data: su } = await withTimeout(
         supabase
           .from('super_users')
-          .select('*')
+          .select('super_user_id, email, full_name, role, is_active, created_at')
           .eq('super_user_id', user.id)
           .single(),
         3000,
@@ -262,23 +266,27 @@ async function resolveUserType(
         return;
       }
     } catch (timeoutErr) {
-      // DB query hung (network/edge issue) — fall back to auth metadata so
-      // login is never blocked by a stuck request.
-      console.warn('[AUTH] super_users fallback:', (timeoutErr as Error).message);
-      const fallback: SuperUser = {
-        super_user_id: user.id,
-        email: user.email ?? '',
-        full_name: typeof meta.full_name === 'string' ? meta.full_name : '',
-        role: meta.is_support ? 'support' : 'super_admin',
-        is_active: true,
-        created_at: user.created_at ?? new Date().toISOString(),
-      };
-      set({
-        superUser: fallback,
-        profile: null,
-        userType: fallback.role === 'support' ? 'support' : 'super_admin',
-      });
-      return;
+      // DB query hung (network/edge issue) — retry once without the timeout.
+      // Never fabricate a super_admin role from client metadata: server-side
+      // endpoints independently verify super_users membership.
+      console.warn('[AUTH] super_users query retry:', (timeoutErr as Error).message);
+      try {
+        const { data: suRetry } = await supabase
+          .from('super_users')
+          .select('super_user_id, email, full_name, role, is_active, created_at')
+          .eq('super_user_id', user.id)
+          .single();
+        if (suRetry) {
+          set({
+            superUser: suRetry as SuperUser,
+            profile: null,
+            userType: suRetry.role === 'support' ? 'support' : 'super_admin',
+          });
+          return;
+        }
+      } catch {
+        // give up — resolveUserType falls through to tenant checks
+      }
     }
   }
 
@@ -324,7 +332,7 @@ async function resolveTenantProfile(
     const { data: profile } = await withTimeout(
       tenantClient
         .from('users')
-        .select('*, stores!assigned_store_id(name)')
+        .select('user_id, email, username, full_name, role, is_active, requires_password_change, assigned_store_id, created_at, stores!assigned_store_id(name)')
         .eq('user_id', user.id)
         .single(),
       3000,

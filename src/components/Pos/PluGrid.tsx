@@ -1,4 +1,5 @@
 import type { Plu } from '../../types';
+import { getCurrencySymbol } from '../../lib/formatCurrency';
 
 interface PluGridProps {
   items: Plu[];
@@ -35,7 +36,7 @@ export default function PluGrid({ items, onSelect, getEffectivePrice }: PluGridP
               {plu.name}
             </span>
             <span style={{ fontSize: '0.85rem', color: 'var(--accent)', fontWeight: 700, marginTop: '4px' }}>
-              £{price.toFixed(2)}
+              {getCurrencySymbol()}{price.toFixed(2)}
             </span>
           </button>
         );

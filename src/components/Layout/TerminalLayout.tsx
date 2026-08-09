@@ -13,7 +13,9 @@ const NAV_ITEMS = [
 ];
 
 function getPosStoreId() {
-  return sessionStorage.getItem('pos_store_id');
+  const storeId = sessionStorage.getItem('pos_store_id');
+  const token = sessionStorage.getItem('pos_token');
+  return storeId && token ? storeId : null;
 }
 
 function getPosStoreName() {
@@ -52,6 +54,10 @@ export default function TerminalLayout() {
             onClick={() => {
               sessionStorage.removeItem('pos_store_id');
               sessionStorage.removeItem('pos_store_name');
+              sessionStorage.removeItem('pos_token');
+              sessionStorage.removeItem('pos_user_id');
+              sessionStorage.removeItem('pos_user_name');
+              sessionStorage.removeItem('pos_user_role');
               navigate('/pos/select-store', { replace: true });
             }}
           >

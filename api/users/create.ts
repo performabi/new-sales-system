@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import crypto from 'crypto';
+import { hashPin, resolveIdentity, identityHasSchema } from '../../src/server/apiAuth';
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
 const serviceRole = process.env.SERVICE_ROLE || '';
@@ -8,6 +8,13 @@ const serviceRole = process.env.SERVICE_ROLE || '';
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
     res.status(405).json({ error: 'Method Not Allowed' });
+    return;
+  }
+
+  const env = { supabaseUrl, serviceRole, anonKey: '' };
+  const identity = await resolveIdentity(req, env);
+  if (!identity) {
+    res.status(401).json({ error: 'Unauthorized — missing or invalid session' });
     return;
   }
 
@@ -41,6 +48,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
   if (!tenant_schema) {
     res.status(400).json({ error: 'tenant_schema is required' });
+    return;
+  }
+  if (!identityHasSchema(identity, tenant_schema)) {
+    res.status(403).json({ error: 'Not a member of this tenant' });
     return;
   }
   if (!supabaseUrl || !serviceRole) {
@@ -125,7 +136,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  const pinHash = crypto.createHash('sha256').update(pin).digest('hex');
+  const pinHash = hashPin(pin);
 
   const { error: profileError } = await supabaseAdmin.from('users').insert({
     user_id: authUserId,

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useAuthStore } from '../../store/authStore';
 import { getSupabaseClient } from '../../lib/supabaseClient';
+import { apiFetch } from '../../lib/api';
 
 export default function AdminSettings() {
   const { superUser, userType } = useAuthStore();
@@ -58,7 +59,7 @@ export default function AdminSettings() {
     if (newPw !== confirmPw) { setPwMsg('Passwords do not match'); return; }
     setChangingPw(true);
     try {
-      const res = await fetch('/api/admin/settings/change-password', {
+      const res = await apiFetch('/api/admin/settings/change-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: superUser?.super_user_id, new_password: newPw }),
@@ -89,7 +90,7 @@ export default function AdminSettings() {
     if (!/^\d{4,8}$/.test(pin)) { setPinMsg('PIN must be 4-8 digits'); return; }
     setChangingPin(true);
     try {
-      const res = await fetch('/api/admin/settings/change-pin', {
+      const res = await apiFetch('/api/admin/settings/change-pin', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: superUser?.super_user_id, pin }),

@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { useAppStore } from '../../store/appStore';
 import { useAuthStore } from '../../store/authStore';
 import DataTable from '../../components/UI/DataTable';
+import { formatCurrency } from '../../lib/formatCurrency';
 
 export default function PurchaseOrders() {
   const navigate = useNavigate();
@@ -86,8 +87,8 @@ export default function PurchaseOrders() {
         <td style="padding: 8px; border-bottom: 1px solid #ddd;">${item.plu?.plu_number || 'N/A'}</td>
         <td style="padding: 8px; border-bottom: 1px solid #ddd;">${item.plu?.name || 'N/A'}</td>
         <td style="padding: 8px; border-bottom: 1px solid #ddd; text-align: center;">${item.quantity_ordered}</td>
-        <td style="padding: 8px; border-bottom: 1px solid #ddd; text-align: right;">£${Number(item.cost_price_at_order).toFixed(2)}</td>
-        <td style="padding: 8px; border-bottom: 1px solid #ddd; text-align: right;">£${(Number(item.cost_price_at_order) * item.quantity_ordered).toFixed(2)}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #ddd; text-align: right;">${formatCurrency(item.cost_price_at_order)}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #ddd; text-align: right;">${formatCurrency(Number(item.cost_price_at_order) * item.quantity_ordered)}</td>
       </tr>
     `).join('');
 
@@ -159,7 +160,7 @@ export default function PurchaseOrders() {
             </div>
             <div style="text-align: right; width: 250px;">
               <div style="font-size: 18px; font-weight: bold; border-top: 2px solid #333; padding-top: 8px;">
-                TOTAL: £${Number(po.total_cost).toFixed(2)}
+                TOTAL: ${formatCurrency(po.total_cost)}
               </div>
             </div>
           </div>
@@ -188,7 +189,7 @@ export default function PurchaseOrders() {
     ...po,
     supplier_name: po.suppliers?.name || 'Unknown',
     status: <span className={`badge badge-${po.status === 'draft' ? 'warning' : 'success'}`}>{po.status.toUpperCase()}</span>,
-    total_cost: `£${Number(po.total_cost).toFixed(2)}`,
+    total_cost: formatCurrency(po.total_cost),
     actions: (
       <div style={{ display: 'flex', gap: '8px' }}>
         <button className="btn btn-secondary btn-sm" onClick={() => handlePrint(po)}>🖨️ PDF / Print</button>
@@ -243,7 +244,7 @@ export default function PurchaseOrders() {
           <>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
               <span style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>
-                {poSuggestions.length} supplier{poSuggestions.length > 1 ? 's' : ''} · {poSuggestions.reduce((c, s) => c + s.items.length, 0)} items · Total: £{totalSuggestedCost.toFixed(2)}
+                {poSuggestions.length} supplier{poSuggestions.length > 1 ? 's' : ''} · {poSuggestions.reduce((c, s) => c + s.items.length, 0)} items · Total: {formatCurrency(totalSuggestedCost)}
               </span>
               <button className="btn btn-primary" onClick={handleCreateDrafts} disabled={creating}>
                 {creating ? 'Creating Drafts…' : `Create Draft PO${poSuggestions.length > 1 ? 's' : ''}`}

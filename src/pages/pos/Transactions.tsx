@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../../store/appStore';
+import { formatCurrency } from '../../lib/formatCurrency';
 
 export default function PosTransactions() {
   const storeId = sessionStorage.getItem('pos_store_id');
@@ -76,8 +77,8 @@ export default function PosTransactions() {
                   <tr key={tx.transaction_id} style={{ cursor: 'pointer' }} onClick={() => setSelectedTx(selectedTx?.transaction_id === tx.transaction_id ? null : tx)}>
                     <td>{new Date(tx.created_at).toLocaleTimeString('en-GB')}</td>
                     <td>{itemCount} item{itemCount !== 1 ? 's' : ''}</td>
-                    <td style={{ fontFamily: 'monospace', fontWeight: 700 }}>£{Number(tx.total_amount).toFixed(2)}</td>
-                    <td>{tx.discount_amount > 0 ? `-£${Number(tx.discount_amount).toFixed(2)}` : '—'}</td>
+                    <td style={{ fontFamily: 'monospace', fontWeight: 700 }}>{formatCurrency(tx.total_amount)}</td>
+                    <td>{tx.discount_amount > 0 ? `-${formatCurrency(tx.discount_amount)}` : '—'}</td>
                     <td style={{ textTransform: 'capitalize' }}>{tx.payment_method}</td>
                     <td>
                       <span className={`badge ${tx.status === 'void' ? 'badge-danger' : 'badge-success'}`}>
@@ -123,8 +124,8 @@ export default function PosTransactions() {
                 <tr key={i}>
                   <td>{item.plu_name}</td>
                   <td>{item.quantity}</td>
-                  <td>£{Number(item.unit_price).toFixed(2)}</td>
-                  <td>£{Number(item.total_price || item.unit_price * item.quantity).toFixed(2)}</td>
+                  <td>{formatCurrency(item.unit_price)}</td>
+                  <td>{formatCurrency(item.total_price || item.unit_price * item.quantity)}</td>
                 </tr>
               ))}
             </tbody>

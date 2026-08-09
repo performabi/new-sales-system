@@ -81,6 +81,8 @@ BEGIN
 
   EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%s_inventory_barcode ON %I.inventory(barcode_qr)',
     replace(v_schema, 'tenant_', ''), v_schema);
+  EXECUTE format('CREATE INDEX IF NOT EXISTS idx_%s_inventory_store_name ON %I.inventory(store_id, name)',
+    replace(v_schema, 'tenant_', ''), v_schema);
 
   -- =============================================
   -- 4. PLU CATEGORIES
@@ -256,13 +258,15 @@ BEGIN
     CREATE TABLE %I.sales_transactions (
       transaction_id  UUID           PRIMARY KEY DEFAULT gen_random_uuid(),
       store_id        UUID           NOT NULL REFERENCES %I.stores(store_id) ON DELETE RESTRICT,
-      staff_user_id   UUID           NOT NULL REFERENCES %I.users(user_id) ON DELETE SET NULL,
+      staff_user_id   UUID           REFERENCES %I.users(user_id) ON DELETE SET NULL,
       total_amount    NUMERIC(12,2)  NOT NULL DEFAULT 0.00,
       discount_amount NUMERIC(12,2)  NOT NULL DEFAULT 0.00,
       payment_method  TEXT           NOT NULL DEFAULT ''cash'',
       payment_note    TEXT,
       loyalty_card_id UUID           REFERENCES %I.loyalty_cards(card_id) ON DELETE SET NULL,
       status          TEXT           NOT NULL DEFAULT ''completed'',
+      cashback_percent NUMERIC(5,2),
+      cashback_earned  NUMERIC(10,2) NOT NULL DEFAULT 0.00,
       created_at      TIMESTAMPTZ    NOT NULL DEFAULT now()
     )', v_schema, v_schema, v_schema, v_schema);
 
@@ -409,6 +413,7 @@ BEGIN
   EXECUTE format('ALTER TABLE %I.item_sizing                ENABLE ROW LEVEL SECURITY', v_schema);
   EXECUTE format('ALTER TABLE %I.staff_timesheets           ENABLE ROW LEVEL SECURITY', v_schema);
   EXECUTE format('ALTER TABLE %I.store_checklists           ENABLE ROW LEVEL SECURITY', v_schema);
+  EXECUTE format('ALTER TABLE %I.system_settings           ENABLE ROW LEVEL SECURITY', v_schema);
   EXECUTE format('ALTER TABLE %I.loyalty_notifications      ENABLE ROW LEVEL SECURITY', v_schema);
 
   -- RLS Policies (same as original but scoped to tenant schema)
@@ -459,7 +464,7 @@ BEGIN
 
   EXECUTE format('
     CREATE POLICY "plu_categories_user_read" ON %I.plu_categories
-      FOR SELECT USING (true)',
+      FOR SELECT TO authenticated USING (true)',
     v_schema);
 
   EXECUTE format('
@@ -470,7 +475,7 @@ BEGIN
 
   EXECUTE format('
     CREATE POLICY "plu_user_read" ON %I.plu
-      FOR SELECT USING (true)',
+      FOR SELECT TO authenticated USING (true)',
     v_schema);
 
   EXECUTE format('
@@ -544,6 +549,17 @@ BEGIN
     v_schema, v_schema, v_schema);
 
   EXECUTE format('
+    CREATE POLICY "item_sizing_user_read" ON %I.item_sizing
+      FOR SELECT TO authenticated USING (true)',
+    v_schema);
+
+  EXECUTE format('
+    CREATE POLICY "system_settings_admin_all" ON %I.system_settings
+      FOR ALL USING (%I.get_user_role() IN (''super_user'', ''admin''))
+      WITH CHECK (%I.get_user_role() IN (''super_user'', ''admin''))',
+    v_schema, v_schema, v_schema);
+
+  EXECUTE format('
     CREATE POLICY "loyalty_cards_admin_all" ON %I.loyalty_cards
       FOR ALL USING (%I.get_user_role() IN (''super_user'', ''admin''))
       WITH CHECK (%I.get_user_role() IN (''super_user'', ''admin''))',
@@ -560,6 +576,7 @@ BEGIN
   -- =============================================
   EXECUTE format('GRANT USAGE ON SCHEMA %I TO anon, authenticated, service_role', v_schema);
   EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I TO anon, authenticated, service_role', v_schema);
+  EXECUTE format('REVOKE INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA %I FROM anon', v_schema);
   EXECUTE format('GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA %I TO anon, authenticated, service_role', v_schema);
   EXECUTE format('GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA %I TO anon, authenticated, service_role', v_schema);
 

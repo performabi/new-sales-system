@@ -118,7 +118,9 @@ async function fetchTenantSlug(): Promise<string | null> {
   const schema = state.activeTenantSchema || state.user?.user_metadata?.tenant_schema as string | undefined;
   if (!schema) return null;
   try {
-    const res = await fetch(`/api/app/tenant-info?tenant_schema=${encodeURIComponent(schema)}`);
+    const headers = new Headers();
+    if (state.session?.access_token) headers.set('Authorization', `Bearer ${state.session.access_token}`);
+    const res = await fetch(`/api/app/tenant-info?tenant_schema=${encodeURIComponent(schema)}`, { headers });
     if (!res.ok) return null;
     const tenant = await res.json();
     return tenant.slug as string;

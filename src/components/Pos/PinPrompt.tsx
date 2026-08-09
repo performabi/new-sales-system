@@ -39,6 +39,9 @@ export default function PinPrompt({ isOpen, onClose, onSuccess, title }: PinProm
         setSubmitting(false);
         return;
       }
+      if (data.pos_token) {
+        sessionStorage.setItem('pos_token', data.pos_token);
+      }
       setPin('');
       setSubmitting(false);
       onSuccess(data.user);

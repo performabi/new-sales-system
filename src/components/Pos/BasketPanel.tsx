@@ -1,4 +1,5 @@
 import { useAppStore } from '../../store/appStore';
+import { getCurrencySymbol } from '../../lib/formatCurrency';
 import PinPrompt from './PinPrompt';
 
 interface BasketPanelProps {
@@ -12,7 +13,7 @@ interface BasketPanelProps {
   currencySymbol?: string;
 }
 
-export default function BasketPanel({ onFinalise, onAddLoyalty, onNewTab, showPinPrompt, pinTitle, onPinSuccess, onClosePin, currencySymbol = '£' }: BasketPanelProps) {
+export default function BasketPanel({ onFinalise, onAddLoyalty, onNewTab, showPinPrompt, pinTitle, onPinSuccess, onClosePin, currencySymbol = getCurrencySymbol() }: BasketPanelProps) {
   const basketTabs = useAppStore((s) => s.basketTabs);
   const activeTabId = useAppStore((s) => s.activeTabId);
   const switchBasket = useAppStore((s) => s.switchBasket);
@@ -78,7 +79,7 @@ export default function BasketPanel({ onFinalise, onAddLoyalty, onNewTab, showPi
                 {item.name}
               </div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                £{item.unit_price.toFixed(2)} × {item.quantity}
+                {currencySymbol}{item.unit_price.toFixed(2)} × {item.quantity}
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -101,7 +102,7 @@ export default function BasketPanel({ onFinalise, onAddLoyalty, onNewTab, showPi
               </button>
             </div>
             <div style={{ fontFamily: 'monospace', fontWeight: 700, minWidth: '60px', textAlign: 'right' }}>
-              £{(item.unit_price * item.quantity).toFixed(2)}
+              {currencySymbol}{(item.unit_price * item.quantity).toFixed(2)}
             </div>
             <button
               className="btn btn-ghost"

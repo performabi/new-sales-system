@@ -24,7 +24,10 @@ export default function TenantSelect() {
       const infos: TenantInfo[] = [];
       for (const schema of schemas) {
         try {
-          const res = await fetch(`/api/app/tenant-info?tenant_schema=${encodeURIComponent(schema)}`);
+          const headers = new Headers();
+          const accessToken = useAuthStore.getState().session?.access_token;
+          if (accessToken) headers.set('Authorization', `Bearer ${accessToken}`);
+          const res = await fetch(`/api/app/tenant-info?tenant_schema=${encodeURIComponent(schema)}`, { headers });
           if (res.ok) {
             const tenant = await res.json();
             infos.push({ schema, name: tenant.name || schema, slug: tenant.slug || schema });

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAuthStore } from '../../store/authStore';
+import { apiFetch } from '../../lib/api';
 import type { SuperUser } from '../../types';
 
 export default function AdminSuperUsers() {
@@ -20,7 +21,7 @@ export default function AdminSuperUsers() {
 
   async function fetchUsers() {
     try {
-      const res = await fetch('/api/admin/super-users');
+      const res = await apiFetch('/api/admin/super-users');
       if (res.ok) setUsers(await res.json());
     } catch {
       console.warn('Failed to fetch super users');
@@ -39,7 +40,7 @@ export default function AdminSuperUsers() {
     }
     setSubmitting(true);
     try {
-      const res = await fetch('/api/admin/super-users/invite', {
+      const res = await apiFetch('/api/admin/super-users/invite', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, full_name: fullName, role }),

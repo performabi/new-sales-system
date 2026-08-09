@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { apiFetch } from '../../lib/api';
 import type { Tenant, TenantPlan } from '../../types';
 
 interface MainUser {
@@ -99,7 +100,7 @@ export default function AdminTenantDetail() {
     })();
     (async () => {
       try {
-        const res = await fetch(`/api/admin/tenants/${tenantId}/main-user`);
+        const res = await apiFetch(`/api/admin/tenants/${tenantId}/main-user`);
         if (res.ok) {
           const user: MainUser = await res.json();
           setMainUser(user);
@@ -121,7 +122,7 @@ export default function AdminTenantDetail() {
     setTenantSaving(true);
     setTenantMsg(null);
     try {
-      const res = await fetch(`/api/admin/tenants/${tenant.tenant_id}`, {
+      const res = await apiFetch(`/api/admin/tenants/${tenant.tenant_id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -148,7 +149,7 @@ export default function AdminTenantDetail() {
     setMuSaving(true);
     setMuMsg(null);
     try {
-      const res = await fetch(`/api/admin/tenants/${tenant.tenant_id}/main-user`, {
+      const res = await apiFetch(`/api/admin/tenants/${tenant.tenant_id}/main-user`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -193,7 +194,7 @@ export default function AdminTenantDetail() {
     setMuMsg(null);
     setShowReassignModal(false);
     try {
-      const res = await fetch(`/api/admin/tenants/${tenant.tenant_id}/main-user/reassign`, {
+      const res = await apiFetch(`/api/admin/tenants/${tenant.tenant_id}/main-user/reassign`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ existing_user_id: reassignUser.id }),
@@ -202,7 +203,7 @@ export default function AdminTenantDetail() {
       if (!res.ok) throw new Error(data.error || 'Failed to reassign');
       setMuMsg((data.warning ? `${data.warning} ` : '') + 'Main user reassigned');
       // Refresh main user data
-      const refreshRes = await fetch(`/api/admin/tenants/${tenant.tenant_id}/main-user`);
+      const refreshRes = await apiFetch(`/api/admin/tenants/${tenant.tenant_id}/main-user`);
       if (refreshRes.ok) {
         const user: MainUser = await refreshRes.json();
         setMainUser(user);
@@ -229,7 +230,7 @@ export default function AdminTenantDetail() {
     setResending(true);
     setResendMsg(null);
     try {
-      const res = await fetch(`/api/admin/tenants/${tenant.tenant_id}/main-user/resend-invite`, {
+      const res = await apiFetch(`/api/admin/tenants/${tenant.tenant_id}/main-user/resend-invite`, {
         method: 'POST',
       });
       const data = await res.json();
@@ -251,7 +252,7 @@ export default function AdminTenantDetail() {
     setInviting(true);
     setInviteMsg(null);
     try {
-      const res = await fetch(`/api/admin/tenants/${tenant.tenant_id}/main-user`, {
+      const res = await apiFetch(`/api/admin/tenants/${tenant.tenant_id}/main-user`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: inviteEmail, full_name: inviteName }),
@@ -271,7 +272,7 @@ export default function AdminTenantDetail() {
     setPwdSaving(true);
     setPwdMsg(null);
     try {
-      const res = await fetch(`/api/admin/tenants/${tenant.tenant_id}/main-user/reset-password`, {
+      const res = await apiFetch(`/api/admin/tenants/${tenant.tenant_id}/main-user/reset-password`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: mainUser.user_id, new_password: tempPwd }),

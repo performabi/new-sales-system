@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../../store/authStore';
+import { apiFetch } from '../../lib/api';
 import type { Tenant } from '../../types';
 
 export default function AdminDashboard() {
@@ -16,7 +17,7 @@ export default function AdminDashboard() {
 
   async function fetchTenants() {
     try {
-      const res = await fetch('/api/admin/tenants');
+      const res = await apiFetch('/api/admin/tenants');
       if (res.ok) {
         const data = await res.json();
         setTenants(data);
