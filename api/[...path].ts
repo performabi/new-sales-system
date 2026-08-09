@@ -41,19 +41,19 @@ function emailConflictResponse(res: VercelResponse, existing: any) {
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   let supabaseAdmin;
-  try {
-    const schema = (req.query.tenant_schema as string) || (req.body?.tenant_schema as string);
-    supabaseAdmin = getSupabaseAdmin(schema);
-  } catch (e) {
-    return res.status(500).json({ error: (e as Error).message });
-  }
-
   const rawPath = req.query.path;
   let path: string[] = [];
   if (Array.isArray(rawPath)) path = rawPath.map(String);
   else if (typeof rawPath === 'string') path = rawPath.split('/').filter(Boolean);
   const method = req.method || 'GET';
   const body = req.body || {};
+
+  try {
+    const schema = path[0] === 'admin' ? 'public' : ((req.query.tenant_schema as string) || (req.body?.tenant_schema as string));
+    supabaseAdmin = getSupabaseAdmin(schema);
+  } catch (e) {
+    return res.status(500).json({ error: (e as Error).message });
+  }
 
   try {
     // PLU Categories
@@ -188,7 +188,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.json(data);
       }
       if (path[1] === 'create' && method === 'POST') {
-        const { email, password, username, full_name, role, pin, assigned_store_id, created_by } = body;
+        const { email, username, full_name, role, pin, assigned_store_id, created_by } = body;
         const schema = (req.query.tenant_schema as string) || (body.tenant_schema as string);
         const authAdmin = getSupabaseAdmin();
         const { data: listData } = await authAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
@@ -196,6 +196,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         let authUserId: string;
         let linked = false;
+        let invited = false;
+        const inviteOptions: any = {
+          data: { tenant_schemas: [schema], tenant_schema: schema, full_name: full_name || '' },
+          redirectTo: process.env.APP_URL || req.headers.origin || undefined,
+        };
 
         if (existing) {
           linked = true;
@@ -215,14 +220,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             },
           });
           if (metaError) return res.status(400).json({ error: metaError.message });
+          if (!existing.confirmed_at) {
+            const { error: inviteError } = await authAdmin.auth.admin.inviteUserByEmail(email, inviteOptions);
+            if (inviteError) return res.status(400).json({ error: inviteError.message });
+            invited = true;
+          }
         } else {
-          const { data: authData, error: authError } = await authAdmin.auth.admin.createUser({
-            email, password, email_confirm: true,
-            user_metadata: { tenant_schemas: [schema], tenant_schema: schema, full_name: full_name || '' },
-          });
-          if (authError) return res.status(400).json({ error: authError.message });
-          if (!authData.user) return res.status(400).json({ error: 'Failed to create auth user.' });
-          authUserId = authData.user.id;
+          const { data: inviteData, error: inviteError } = await authAdmin.auth.admin.inviteUserByEmail(email, inviteOptions);
+          if (inviteError) return res.status(400).json({ error: inviteError.message });
+          if (!inviteData?.user) return res.status(400).json({ error: 'Failed to create auth user.' });
+          authUserId = inviteData.user.id;
+          invited = true;
         }
 
         const { data: existingRow } = await supabaseAdmin.from('users').select('user_id').eq('user_id', authUserId).maybeSingle();
@@ -238,7 +246,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           if (!linked) await authAdmin.auth.admin.deleteUser(authUserId);
           return res.status(400).json({ error: profileError.message });
         }
-        return res.json({ success: true, user_id: authUserId, linked });
+        return res.json({ success: true, user_id: authUserId, linked, invited });
       }
       if (path[1] && method === 'PUT' && path[2] !== 'reset-password') {
         const { email, password, username, full_name, role, is_active, assigned_store_id, pin } = body;
@@ -267,6 +275,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { error } = await supabaseAdmin.auth.admin.updateUserById(path[1], { password });
         if (error) return res.status(400).json({ error: error.message });
         return res.json({ success: true });
+      }
+      if (path[1] && path[2] === 'resend-invite' && method === 'PUT') {
+        const { data: authUser, error: getUserError } = await supabaseAdmin.auth.admin.getUserById(path[1]);
+        if (getUserError || !authUser?.user) return res.status(404).json({ error: 'User not found' });
+
+        const email = authUser.user.email;
+        if (!email) return res.status(400).json({ error: 'User has no email' });
+
+        if (!authUser.user.confirmed_at) {
+          const { error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+            data: { ...(authUser.user.user_metadata || {}) },
+            redirectTo: process.env.APP_URL || req.headers.origin || undefined,
+          });
+          if (inviteError) return res.status(400).json({ error: inviteError.message });
+          return res.json({ success: true, method: 'invite' });
+        }
+
+        const anon = createClient(process.env.VITE_SUPABASE_URL || '', process.env.VITE_SUPABASE_ANON_KEY || '');
+        const { error: resetError } = await anon.auth.resetPasswordForEmail(email, {
+          redirectTo: process.env.APP_URL || req.headers.origin || undefined,
+        });
+        if (resetError) return res.status(400).json({ error: resetError.message });
+        return res.json({ success: true, method: 'recovery' });
       }
     }
 
@@ -504,7 +535,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Stores: list active stores (for POS store selection)
     if (path[0] === 'stores' && method === 'GET') {
-      const { data, error } = await supabaseAdmin.from('stores').select('*').eq('is_active', true).order('name');
+      let schema = (req.query.tenant_schema as string) || '';
+      const slug = (req.query.tenant_slug as string) || '';
+      if (!schema && slug) {
+        const pub = getSupabaseAdmin();
+        const { data: tenant } = await pub.from('tenants').select('schema_name').eq('slug', slug).maybeSingle();
+        if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+        schema = tenant.schema_name;
+      }
+      if (!schema) return res.status(400).json({ error: 'tenant_schema or tenant_slug required' });
+      const client = getSupabaseAdmin(schema);
+      const { data, error } = await client.from('stores').select('*').eq('is_active', true).order('name');
       if (error) return res.status(500).json({ error: error.message });
       return res.json(data);
     }
@@ -515,8 +556,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!pin || pin.length < 4) {
         return res.status(400).json({ error: 'PIN must be at least 4 digits' });
       }
+      const schema = (req.query.tenant_schema as string) || (body.tenant_schema as string) || '';
+      if (!schema) {
+        return res.status(400).json({ error: 'tenant_schema is required' });
+      }
+      const tenantClient = getSupabaseAdmin(schema);
       const pinHash = crypto.createHash('sha256').update(pin).digest('hex');
-      const { data: users, error } = await supabaseAdmin
+      const { data: users, error } = await tenantClient
         .from('users')
         .select('*, stores!assigned_store_id(name)')
         .eq('pin_hash', pinHash)
@@ -526,6 +572,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(401).json({ error: 'Invalid PIN' });
       }
       const user = users[0];
+      const { data: authUser } = await tenantClient.auth.admin.getUserById(user.user_id);
+      if (authUser?.user && !authUser.user.confirmed_at) {
+        return res.status(401).json({ error: 'Please verify your email before using the terminal' });
+      }
       return res.json({
         user: {
           user_id: user.user_id,
@@ -705,14 +755,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (path[0] === 'loyalty-cards' && path[1] === 'create' && method === 'POST') {
       const { customer_name, phone, email, cashback_balance } = body;
       if (!customer_name) return res.status(400).json({ error: 'customer_name required' });
+      let schema = (req.query.tenant_schema as string) || body.tenant_schema || '';
+      const slug = body.tenant_slug || (req.query.tenant_slug as string) || '';
+      if (!schema && slug) {
+        const pub = getSupabaseAdmin();
+        const { data: tenant } = await pub.from('tenants').select('schema_name').eq('slug', slug).maybeSingle();
+        if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+        schema = tenant.schema_name;
+      }
+      if (!schema) return res.status(400).json({ error: 'tenant_schema or tenant_slug required' });
+      const client = getSupabaseAdmin(schema);
       const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-      const { count } = await supabaseAdmin.from('loyalty_cards').select('card_number', { count: 'exact', head: true })
+      const { count } = await client.from('loyalty_cards').select('card_number', { count: 'exact', head: true })
         .like('card_number', `LC-${today}-%`);
       const seq = String((count ?? 0) + 1).padStart(4, '0');
       const card_number = `LC-${today}-${seq}`;
-      const { data, error } = await supabaseAdmin.from('loyalty_cards').insert({
+      const { data, error } = await client.from('loyalty_cards').insert({
         store_id: body.store_id || null, card_number, customer_name: customer_name.trim(),
-        phone: phone || null, email: email || null, cashback_balance: cashback_balance ?? 0,
+        phone: phone || null, email: email || null, postcode: body.postcode || null,
+        cashback_balance: cashback_balance ?? 0,
       }).select().single();
       if (error) return res.status(400).json({ error: error.message });
       return res.json({ success: true, card: data });
@@ -720,7 +781,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Loyalty Cards: update
     if (path[0] === 'loyalty-cards' && path[1] && method === 'PUT') {
-      const { error } = await supabaseAdmin.from('loyalty_cards').update(body).eq('card_id', path[1]);
+      const allowed = ['customer_name', 'phone', 'email', 'postcode', 'store_id', 'cashback_balance', 'is_active'];
+      const updates: any = {};
+      for (const key of allowed) {
+        if (body[key] !== undefined) updates[key] = body[key];
+      }
+      if (!Object.keys(updates).length) return res.status(400).json({ error: 'No valid fields to update' });
+      const { data: existing } = await supabaseAdmin.from('loyalty_cards').select('card_id').eq('card_id', path[1]).maybeSingle();
+      if (!existing) return res.status(404).json({ error: 'Card not found' });
+      const { error } = await supabaseAdmin.from('loyalty_cards').update(updates).eq('card_id', path[1]);
       if (error) return res.status(400).json({ error: error.message });
       return res.json({ success: true });
     }
@@ -747,12 +816,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (txErr) return res.status(400).json({ error: txErr.message });
       const saleId = transaction.transaction_id;
       for (const item of items) {
-        await supabaseAdmin.from('sale_items').insert({
-          transaction_id: saleId, plu_name: item.name, quantity: item.quantity,
+        const { error: itemErr } = await supabaseAdmin.from('sale_items').insert({
+          transaction_id: saleId, plu_id: item.plu_id || null, plu_name: item.plu_name, quantity: item.quantity,
           unit_price: item.unit_price, total_price: item.total_price,
         });
+        if (itemErr) {
+          console.error('Insert sale item error:', itemErr);
+          continue;
+        }
         const { data: invItem } = await supabaseAdmin.from('inventory')
-          .select('product_id, stock_quantity').eq('store_id', store_id).eq('name', item.plu_id).maybeSingle();
+          .select('product_id, stock_quantity').eq('store_id', store_id).eq('name', item.plu_name).maybeSingle();
         if (invItem) {
           const newQty = Math.max(0, (invItem.stock_quantity || 0) - item.quantity);
           await supabaseAdmin.from('inventory').update({ stock_quantity: newQty }).eq('product_id', invItem.product_id);
@@ -839,7 +912,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (path[0] === 'settings' && path[1] === 'loyalty-cashback-percent' && method === 'PUT') {
-      await supabaseAdmin.from('system_settings').upsert({ key: 'loyalty_cashback_percent', value: { percent: body.percent }, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+      const value = Number(body.percent);
+      if (Number.isNaN(value) || value < 0 || value > 100) {
+        return res.status(400).json({ error: 'percent must be a number between 0 and 100' });
+      }
+      await supabaseAdmin.from('system_settings').upsert({ key: 'loyalty_cashback_percent', value: { percent: value }, updated_at: new Date().toISOString() }, { onConflict: 'key' });
       return res.json({ success: true });
     }
 
@@ -869,7 +946,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     // Loyalty Notifications: unseen by store
-    if (path[0] === 'loyalty-notifications' && path[1] === 'unseen' && method === 'GET' && req.query.store_id) {
+    if (path[0] === 'loyalty-notifications' && path[1] === 'unseen' && method === 'GET') {
+      if (!req.query.store_id) return res.status(400).json({ error: 'store_id required' });
       const storeId = req.query.store_id;
       const { data, error } = await supabaseAdmin.from('loyalty_notifications')
         .select('*')
@@ -934,18 +1012,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.json({ success: true });
     }
 
-    // ---- App: get current tenant info (by tenant_schema) ----
+    // ---- App: get current tenant info (by tenant_schema or slug) ----
     if (path[0] === 'app' && path[1] === 'tenant-info' && method === 'GET') {
       const schema = (req.query.tenant_schema as string) || '';
-      if (!schema) return res.status(400).json({ error: 'tenant_schema required' });
+      const slug = (req.query.slug as string) || '';
+      if (!schema && !slug) return res.status(400).json({ error: 'tenant_schema or slug required' });
       const pub = getSupabaseAdmin();
-      const { data: tenant, error } = await pub.from('tenants')
-        .select('tenant_id, name, slug, schema_name')
-        .eq('schema_name', schema)
-        .maybeSingle();
+      let q = pub.from('tenants').select('tenant_id, name, slug, schema_name');
+      if (schema) q = q.eq('schema_name', schema);
+      else q = q.eq('slug', slug);
+      const { data: tenant, error } = await q.maybeSingle();
       if (error) return res.status(500).json({ error: error.message });
       if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
       return res.json(tenant);
+    }
+
+    // ---- Public: list active tenants (for loyalty registration) ----
+    if (path[0] === 'public' && path[1] === 'tenants' && method === 'GET') {
+      const { data, error } = await supabaseAdmin.from('tenants')
+        .select('tenant_id, name, slug')
+        .eq('is_active', true)
+        .order('name');
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json(data || []);
     }
 
     // ---- Admin: invite tenant main user (when none exists) ----

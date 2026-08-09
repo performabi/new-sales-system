@@ -8,7 +8,7 @@ import { useAuthStore } from '../../store/authStore';
 
 export default function Users() {
   const profile = useAuthStore((s) => s.profile);
-  const { users, usersLoading, stores, fetchUsers, fetchStores, addUser, updateUser, deleteUser } = useAppStore();
+  const { users, usersLoading, stores, fetchUsers, fetchStores, addUser, updateUser, deleteUser, resendInvite } = useAppStore();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
@@ -17,7 +17,6 @@ export default function Users() {
 
   // Form State
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [username, setUsername] = useState('');
   const [fullName, setFullName] = useState('');
   const [role, setRole] = useState<'admin' | 'user'>('user');
@@ -51,7 +50,6 @@ export default function Users() {
     } else {
       const res = await addUser({
         email,
-        password,
         username,
         full_name: fullName,
         role,
@@ -74,7 +72,6 @@ export default function Users() {
     setIsEditMode(false);
     setEditingUserId(null);
     setEmail('');
-    setPassword('');
     setUsername('');
     setFullName('');
     setRole('user');
@@ -89,7 +86,6 @@ export default function Users() {
     setIsEditMode(true);
     setEditingUserId(user.user_id);
     setEmail(user.email || ''); // email might not be in profile
-    setPassword('');
     setUsername(user.username);
     setFullName(user.full_name);
     setRole(user.role as 'admin' | 'user');
@@ -153,6 +149,19 @@ export default function Users() {
         >
           🔑
         </button>
+        <button
+          className="btn btn-sm btn-ghost"
+          title="Resend verification / password reset email"
+          onClick={async (e) => {
+            e.stopPropagation();
+            if (confirm(`Send verification email to "${u.username}" (${u.email})?`)) {
+              await resendInvite(u.user_id);
+            }
+          }}
+          disabled={u.role === 'super_user'}
+        >
+          📧
+        </button>
         {profile?.role === 'super_user' && u.role !== 'super_user' && (
           <button
             className="btn btn-sm btn-ghost"
@@ -208,16 +217,9 @@ export default function Users() {
 
           {!isEditMode && (
             <div className="form-group">
-              <label className="form-label" htmlFor="password">Password</label>
-              <input
-                id="password"
-                type="password"
-                className="form-input"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-                minLength={6}
-              />
+              <p style={{ margin: 0, fontSize: '0.9rem', color: 'var(--text-muted)' }}>
+                A verification email will be sent to this address — the user sets their own password via the link.
+              </p>
             </div>
           )}
 

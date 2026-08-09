@@ -57,7 +57,6 @@ interface AppState {
   fetchUsers: () => Promise<void>;
   addUser: (data: {
     email: string;
-    password: string;
     username: string;
     full_name: string;
     role: 'admin' | 'user';
@@ -67,6 +66,7 @@ interface AppState {
   updateUser: (id: string, data: Partial<UserProfile>) => Promise<{ error: string | null }>;
   deleteUser: (id: string) => Promise<{ error: string | null }>;
   resetUserPassword: (id: string, newPassword?: string) => Promise<{ error: string | null }>;
+  resendInvite: (id: string) => Promise<{ error: string | null; method?: string }>;
 
   // Inventory
   inventory: InventoryItem[];
@@ -186,7 +186,7 @@ interface AppState {
   loyaltyNotifications: LoyaltyNotification[];
   loyaltyNotificationsLoading: boolean;
   fetchLoyaltyNotifications: () => Promise<void>;
-  createNotification: (data: { title: string; body: string; store_id?: string }) => Promise<{ error: string | null }>;
+  createNotification: (data: { title: string; body: string; store_id?: string }) => Promise<{ error: string | null; notification: LoyaltyNotification | null }>;
   sendNotification: (id: string) => Promise<{ error: string | null }>;
   unseenNotifications: LoyaltyNotification[];
   fetchUnseenNotifications: (storeId: string) => Promise<void>;
@@ -426,7 +426,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           action: 'create',
         });
       }
-      get().addToast('success', `User "${userData.username}" created successfully`);
+      get().addToast('success', `User "${userData.username}" created - verification email sent`);
       await get().fetchUsers();
       return { error: null };
     } catch (err) {
@@ -541,6 +541,27 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       get().addToast('success', 'Password reset to Sales12345');
       return { error: null };
+    } catch (err) {
+      get().addToast('error', (err as Error).message);
+      return { error: (err as Error).message };
+    }
+  },
+
+  resendInvite: async (id) => {
+    try {
+      const tenantSchema = getActiveSchema() as string;
+      const response = await apiFetch(`/api/users/${id}/resend-invite`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tenant_schema: tenantSchema }),
+      });
+      const result = await response.json();
+      if (!response.ok) {
+        get().addToast('error', result.error || 'Failed to send email');
+        return { error: result.error || 'Failed to send email' };
+      }
+      get().addToast('success', result.method === 'recovery' ? 'Password reset email sent' : 'Verification email sent');
+      return { error: null, method: result.method };
     } catch (err) {
       get().addToast('error', (err as Error).message);
       return { error: (err as Error).message };
@@ -1566,12 +1587,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       });
       if (!res.ok) {
         const err = await res.json();
-        return { error: err.error || 'Failed to create notification' };
+        return { error: err.error || 'Failed to create notification', notification: null };
       }
+      const notification = await res.json();
       await get().fetchLoyaltyNotifications();
-      return { error: null };
+      return { error: null, notification: notification.notification };
     } catch {
-      return { error: 'Network error' };
+      return { error: 'Network error', notification: null };
     }
   },
 

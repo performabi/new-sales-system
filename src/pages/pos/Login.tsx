@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAuthStore } from '../../store/authStore';
 
 export default function PosLogin() {
   const [pin, setPin] = useState('');
@@ -26,10 +27,12 @@ export default function PosLogin() {
     setIsSubmitting(true);
 
     try {
+      const state = useAuthStore.getState();
+      const tenantSchema = state.activeTenantSchema || state.user?.user_metadata?.tenant_schema as string | undefined;
       const res = await fetch('/api/pos/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin }),
+        body: JSON.stringify({ pin, tenant_schema: tenantSchema }),
       });
 
       const data = await res.json();

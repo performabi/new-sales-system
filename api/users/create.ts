@@ -13,7 +13,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const {
     email,
-    password,
     username,
     full_name,
     role,
@@ -23,7 +22,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     tenant_schema,
   } = req.body as {
     email: string;
-    password: string;
     username: string;
     full_name: string;
     role: string;
@@ -33,7 +31,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     tenant_schema?: string;
   };
 
-  if (!email || !password || !username || !full_name || !role || !pin) {
+  if (!email || !username || !full_name || !role || !pin) {
     res.status(400).json({ error: 'Missing required fields' });
     return;
   }
@@ -68,6 +66,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   let authUserId: string;
   let linked = false;
+  let invited = false;
+  const inviteOptions: {
+    data: Record<string, unknown>;
+    redirectTo: string | undefined;
+  } = {
+    data: { tenant_schemas: [tenant_schema], tenant_schema, full_name: full_name || '' },
+    redirectTo: process.env.APP_URL || req.headers.origin || undefined,
+  };
 
   if (existing) {
     linked = true;
@@ -91,26 +97,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       res.status(400).json({ error: metaError.message });
       return;
     }
+    if (!existing.confirmed_at) {
+      const { error: inviteError } = await supabaseAuth.auth.admin.inviteUserByEmail(email, inviteOptions);
+      if (inviteError) {
+        res.status(400).json({ error: inviteError.message });
+        return;
+      }
+      invited = true;
+    }
   } else {
-    const { data: authData, error: authError } = await supabaseAuth.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: {
-        tenant_schemas: [tenant_schema],
-        tenant_schema,
-        full_name: full_name || '',
-      },
-    });
-    if (authError) {
-      res.status(400).json({ error: authError.message });
+    const { data: inviteData, error: inviteError } = await supabaseAuth.auth.admin.inviteUserByEmail(email, inviteOptions);
+    if (inviteError) {
+      res.status(400).json({ error: inviteError.message });
       return;
     }
-    if (!authData?.user) {
+    if (!inviteData?.user) {
       res.status(400).json({ error: 'Failed to create auth user' });
       return;
     }
-    authUserId = authData.user.id;
+    authUserId = inviteData.user.id;
+    invited = true;
   }
 
   const { data: existingRow } = await supabaseAdmin.from('users').select('user_id').eq('user_id', authUserId).maybeSingle();
@@ -141,5 +147,5 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return;
   }
 
-  res.status(200).json({ success: true, user_id: authUserId, linked });
+  res.status(200).json({ success: true, user_id: authUserId, linked, invited });
 }

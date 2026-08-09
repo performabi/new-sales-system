@@ -6,6 +6,12 @@ interface PosStore {
   name: string;
 }
 
+interface PublicTenant {
+  tenant_id: string;
+  name: string;
+  slug: string;
+}
+
 const COUNTRY_CODES = [
   { code: '+44', label: '🇬🇧 UK' },
   { code: '+1', label: '🇺🇸 US' },
@@ -33,7 +39,7 @@ const COUNTRY_CODES = [
   { code: '+974', label: '🇶🇦 Qatar' },
 ];
 
-export default function LoyaltyRegister() {
+export default function LoyaltyRegister({ tenantSlug }: { tenantSlug?: string }) {
   const [customerName, setCustomerName] = useState('');
   const [countryCode, setCountryCode] = useState('+44');
   const [phoneNumber, setPhoneNumber] = useState('');
@@ -45,13 +51,40 @@ export default function LoyaltyRegister() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState<{ card_number: string; customer_name: string } | null>(null);
   const [qrDataUrl, setQrDataUrl] = useState('');
+  const [tenantName, setTenantName] = useState('');
+  const [tenants, setTenants] = useState<PublicTenant[]>([]);
+  const [resolvedSlug, setResolvedSlug] = useState<string | null>(null);
+  const [agreeToTerms, setAgreeToTerms] = useState(false);
 
   useEffect(() => {
-    fetch('/api/stores')
-      .then((r) => r.json())
+    if (tenantSlug) {
+      setResolvedSlug(tenantSlug);
+      fetch(`/api/app/tenant-info?slug=${encodeURIComponent(tenantSlug)}`)
+        .then((r) => (r.ok ? r.json() : Promise.resolve(null)))
+        .then((t) => { if (t?.name) setTenantName(t.name); })
+        .catch(() => {});
+      return;
+    }
+    fetch('/api/public/tenants')
+      .then((r) => (r.ok ? r.json() : Promise.resolve([])))
+      .then((data: PublicTenant[]) => {
+        if (data.length === 1) {
+          setTenantName(data[0].name);
+          setResolvedSlug(data[0].slug);
+        } else {
+          setTenants(data || []);
+        }
+      })
+      .catch(() => {});
+  }, [tenantSlug]);
+
+  useEffect(() => {
+    if (!resolvedSlug) return;
+    fetch(`/api/stores?tenant_slug=${encodeURIComponent(resolvedSlug)}`)
+      .then((r) => (r.ok ? r.json() : Promise.resolve([])))
       .then((data) => setStores(data))
       .catch(() => {});
-  }, []);
+  }, [resolvedSlug]);
 
   useEffect(() => {
     if (success) {
@@ -63,7 +96,7 @@ export default function LoyaltyRegister() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!customerName.trim() || !phoneNumber.trim() || !email.trim() || !postcode.trim()) return;
+    if (!resolvedSlug || !customerName.trim() || !phoneNumber.trim() || !email.trim() || !postcode.trim() || !preferredStoreId || !agreeToTerms) return;
     setSubmitting(true);
     setError('');
     try {
@@ -75,7 +108,8 @@ export default function LoyaltyRegister() {
           phone: `${countryCode} ${phoneNumber.trim()}`,
           email: email.trim(),
           postcode: postcode.trim().toUpperCase(),
-          store_id: preferredStoreId || undefined,
+          store_id: preferredStoreId,
+          tenant_slug: resolvedSlug,
         }),
       });
       const data = await res.json();
@@ -155,12 +189,40 @@ export default function LoyaltyRegister() {
     );
   }
 
+  if (!resolvedSlug && tenants.length > 1) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', background: '#0a1929' }}>
+        <div className="card" style={{ maxWidth: '420px', width: '100%', padding: '32px' }}>
+          <div style={{ textAlign: 'center', marginBottom: '28px' }}>
+            <div style={{ fontSize: '2.5rem', marginBottom: '8px' }}>🏪</div>
+            <h2>Choose a Store</h2>
+            <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '6px' }}>
+              Select the store you'd like to join:
+            </p>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {tenants.map((t) => (
+              <button
+                key={t.tenant_id}
+                className="btn btn-primary"
+                style={{ width: '100%', padding: '14px', fontSize: '1rem' }}
+                onClick={() => { setTenantName(t.name); setResolvedSlug(t.slug); }}
+              >
+                {t.name}
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px', background: '#0a1929' }}>
       <div className="card" style={{ maxWidth: '420px', width: '100%', padding: '32px' }}>
         <div style={{ textAlign: 'center', marginBottom: '28px' }}>
           <div style={{ fontSize: '2.5rem', marginBottom: '8px' }}>💳</div>
-          <h2>Join Our Loyalty Scheme</h2>
+          <h2>{tenantName ? `${tenantName} — Join Our Loyalty Scheme` : 'Join Our Loyalty Scheme'}</h2>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '6px' }}>
             Sign up to earn cashback on every purchase
           </p>
@@ -209,9 +271,9 @@ export default function LoyaltyRegister() {
           </div>
 
           <div className="form-group" style={{ marginBottom: '24px' }}>
-            <label className="form-label">Preferred Store</label>
-            <select className="form-input" value={preferredStoreId} onChange={(e) => setPreferredStoreId(e.target.value)} disabled={submitting}>
-              <option value="">— Select (optional) —</option>
+            <label className="form-label">Preferred Store *</label>
+            <select className="form-input" value={preferredStoreId} onChange={(e) => setPreferredStoreId(e.target.value)} required disabled={submitting}>
+              <option value="">— Select a store —</option>
               {stores.map((s) => (
                 <option key={s.store_id} value={s.store_id}>{s.name}</option>
               ))}
@@ -220,7 +282,27 @@ export default function LoyaltyRegister() {
 
           {error && <div className="form-error" style={{ marginBottom: '16px', textAlign: 'center' }}>{error}</div>}
 
-          <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '14px', fontSize: '1rem' }} disabled={submitting || !customerName.trim() || !phoneNumber.trim() || !email.trim() || !postcode.trim()}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', marginBottom: '20px', cursor: 'pointer', fontSize: '0.82rem', lineHeight: 1.5, color: 'var(--text-muted)' }}>
+            <input
+              type="checkbox"
+              checked={agreeToTerms}
+              onChange={(e) => setAgreeToTerms(e.target.checked)}
+              disabled={submitting}
+              style={{ marginTop: '3px', width: '16px', height: '16px', accentColor: 'var(--accent)', flexShrink: 0 }}
+            />
+            <span>
+              I agree to the{' '}
+              <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>
+                Terms & Conditions
+              </a>{' '}
+              and consent to my personal data being collected and processed in line with UK GDPR, as described in the{' '}
+              <a href="/terms" target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent)', textDecoration: 'underline' }}>
+                Privacy Policy
+              </a>. *
+            </span>
+          </label>
+
+          <button type="submit" className="btn btn-primary" style={{ width: '100%', padding: '14px', fontSize: '1rem' }} disabled={submitting || !customerName.trim() || !phoneNumber.trim() || !email.trim() || !postcode.trim() || !preferredStoreId || !agreeToTerms}>
             {submitting ? 'Creating…' : 'Join Now'}
           </button>
         </form>

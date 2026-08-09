@@ -7,6 +7,7 @@ export default function LoyaltyCards() {
   const {
     loyaltyCards, loyaltyCardsLoading, fetchLoyaltyCards,
     createLoyaltyCard, updateLoyaltyCard, stores, fetchStores,
+    currencyConfig, fetchCurrencyConfig,
   } = useAppStore();
 
   const [showModal, setShowModal] = useState(false);
@@ -23,7 +24,8 @@ export default function LoyaltyCards() {
   useEffect(() => {
     fetchLoyaltyCards();
     if (stores.length === 0) fetchStores();
-  }, [fetchLoyaltyCards, fetchStores, stores.length]);
+    if (!currencyConfig) fetchCurrencyConfig();
+  }, [fetchLoyaltyCards, fetchStores, stores.length, currencyConfig, fetchCurrencyConfig]);
 
   const openCreate = () => {
     setEditingId(null);
@@ -82,6 +84,13 @@ export default function LoyaltyCards() {
 
   const storeMap = new Map(stores.map((s) => [s.store_id, s.name]));
 
+  const shareLink = () => {
+    const match = window.location.pathname.match(/^\/app\/([^/]+)/);
+    const base = match ? `${window.location.origin}/loyalty/${match[1]}/register` : `${window.location.origin}/loyalty/register`;
+    navigator.clipboard.writeText(base);
+    alert('Registration link copied!');
+  };
+
   const columns = [
     { key: 'card_number', label: 'Card #' },
     { key: 'customer_name', label: 'Customer' },
@@ -94,7 +103,7 @@ export default function LoyaltyCards() {
     { key: 'actions', label: 'Actions' },
   ];
 
-  const currencySymbol = '£';
+  const currencySymbol = currencyConfig?.symbol || '£';
 
   const tableData = filtered.map((c: any) => ({
     ...c,
@@ -118,7 +127,7 @@ export default function LoyaltyCards() {
         <div style={{ display: 'flex', gap: '10px', marginTop: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
           <input className="form-input" style={{ maxWidth: '300px' }} placeholder="Search by name or card number…" value={search} onChange={(e) => setSearch(e.target.value)} />
           <button className="btn btn-primary" onClick={openCreate}>+ New Card</button>
-          <button className="btn btn-ghost" onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/loyalty/register`); alert('Registration link copied!'); }}>
+          <button className="btn btn-ghost" onClick={shareLink}>
             🔗 Share Registration Link
           </button>
         </div>

@@ -3,12 +3,13 @@ import { useAppStore } from '../../store/appStore';
 import DataTable from '../../components/UI/DataTable';
 
 export default function LoyaltyNotifications() {
-  const { loyaltyNotifications, loyaltyNotificationsLoading, fetchLoyaltyNotifications, createNotification, stores, fetchStores } = useAppStore();
+  const { loyaltyNotifications, loyaltyNotificationsLoading, fetchLoyaltyNotifications, createNotification, sendNotification, stores, fetchStores } = useAppStore();
 
   const [title, setTitle] = useState('');
   const [body, setBody] = useState('');
   const [storeId, setStoreId] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [sendingId, setSendingId] = useState<string | null>(null);
 
   useEffect(() => {
     fetchLoyaltyNotifications();
@@ -18,12 +19,21 @@ export default function LoyaltyNotifications() {
   const handleSend = async () => {
     if (!title.trim() || !body.trim()) return;
     setSubmitting(true);
-    const { error } = await createNotification({ title: title.trim(), body: body.trim(), store_id: storeId || undefined });
+    const { error, notification } = await createNotification({ title: title.trim(), body: body.trim(), store_id: storeId || undefined });
+    if (!error && notification?.notification_id) {
+      await sendNotification(notification.notification_id);
+    }
     setSubmitting(false);
     if (error) return;
     setTitle('');
     setBody('');
     setStoreId('');
+  };
+
+  const handleSendDraft = async (id: string) => {
+    setSendingId(id);
+    await sendNotification(id);
+    setSendingId(null);
   };
 
   const columns = [
@@ -32,6 +42,7 @@ export default function LoyaltyNotifications() {
     { key: 'store_name', label: 'Store' },
     { key: 'created_at', label: 'Created' },
     { key: 'status', label: 'Status' },
+    { key: 'actions', label: 'Actions' },
   ];
 
   const storeMap = new Map(stores.map((s) => [s.store_id, s.name]));
@@ -41,6 +52,17 @@ export default function LoyaltyNotifications() {
     store_name: n.store_id ? storeMap.get(n.store_id) || 'Specific Store' : 'All Stores',
     created_at: new Date(n.created_at).toLocaleString('en-GB'),
     status: n.sent_at ? <span className="badge badge-success">Sent</span> : <span className="badge badge-warning">Draft</span>,
+    actions: n.sent_at ? (
+      <span style={{ color: 'var(--text-muted)', fontSize: '0.8rem' }}>Delivered</span>
+    ) : (
+      <button
+        className="btn btn-primary btn-sm"
+        onClick={() => handleSendDraft(n.notification_id)}
+        disabled={sendingId === n.notification_id}
+      >
+        {sendingId === n.notification_id ? 'Sending…' : 'Send Now'}
+      </button>
+    ),
   }));
 
   return (

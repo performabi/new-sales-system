@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import Modal from '../UI/Modal';
+import { useAuthStore } from '../../store/authStore';
 
 interface PinResult {
   user_id: string;
@@ -24,10 +25,12 @@ export default function PinPrompt({ isOpen, onClose, onSuccess, title }: PinProm
     setSubmitting(true);
     setError('');
     try {
+      const state = useAuthStore.getState();
+      const tenantSchema = state.activeTenantSchema || state.user?.user_metadata?.tenant_schema as string | undefined;
       const res = await fetch('/api/pos/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin }),
+        body: JSON.stringify({ pin, tenant_schema: tenantSchema }),
       });
       const data = await res.json();
       if (!res.ok) {

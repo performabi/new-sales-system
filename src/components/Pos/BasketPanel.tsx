@@ -9,9 +9,10 @@ interface BasketPanelProps {
   pinTitle: string;
   onPinSuccess: (user: any) => void;
   onClosePin: () => void;
+  currencySymbol?: string;
 }
 
-export default function BasketPanel({ onFinalise, onAddLoyalty, onNewTab, showPinPrompt, pinTitle, onPinSuccess, onClosePin }: BasketPanelProps) {
+export default function BasketPanel({ onFinalise, onAddLoyalty, onNewTab, showPinPrompt, pinTitle, onPinSuccess, onClosePin, currencySymbol = '£' }: BasketPanelProps) {
   const basketTabs = useAppStore((s) => s.basketTabs);
   const activeTabId = useAppStore((s) => s.activeTabId);
   const switchBasket = useAppStore((s) => s.switchBasket);
@@ -117,28 +118,28 @@ export default function BasketPanel({ onFinalise, onAddLoyalty, onNewTab, showPi
       <div style={{ padding: '12px', borderTop: '1px solid rgba(255,255,255,0.1)', flexShrink: 0 }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '4px' }}>
           <span>Subtotal</span>
-          <span>£{subtotal.toFixed(2)}</span>
+          <span>{currencySymbol}{subtotal.toFixed(2)}</span>
         </div>
         {discount > 0 && (
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--accent)' }}>
             <span>Discount</span>
-            <span>-£{discount.toFixed(2)}</span>
+            <span>-{currencySymbol}{discount.toFixed(2)}</span>
           </div>
         )}
         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.15rem', fontWeight: 700, margin: '8px 0' }}>
           <span>Total</span>
-          <span>£{total.toFixed(2)}</span>
+          <span>{currencySymbol}{total.toFixed(2)}</span>
         </div>
 
         <div style={{ display: 'flex', gap: '8px' }}>
           <button className="btn btn-primary" style={{ flex: 1 }} onClick={onFinalise} disabled={!activeTab?.items.length}>
-            Pay £{total.toFixed(2)}
+            Pay {currencySymbol}{total.toFixed(2)}
           </button>
         </div>
         {activeTab && activeTab.loyaltyCustomerName && (
           <div style={{ marginTop: '8px', padding: '8px', background: 'rgba(103,255,166,0.1)', borderRadius: '6px', fontSize: '0.8rem' }}>
             <div><strong>{activeTab.loyaltyCustomerName}</strong></div>
-            <div>Cashback: £{activeTab.loyaltyCashback.toFixed(2)}</div>
+            <div>Cashback: {currencySymbol}{activeTab.loyaltyCashback.toFixed(2)}</div>
             <div style={{ marginTop: '4px', display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span>Discount:</span>
               <input
@@ -150,7 +151,7 @@ export default function BasketPanel({ onFinalise, onAddLoyalty, onNewTab, showPi
                 onChange={(e) => setBasketDiscount(activeTab.tabId, Math.min(activeTab.loyaltyCashback, Math.max(0, Number(e.target.value) || 0)))}
                 style={{ width: '80px', padding: '4px 8px', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.2)', background: 'rgba(0,0,0,0.3)', color: '#fff', fontFamily: 'monospace' }}
               />
-              <span>max £{activeTab.loyaltyCashback.toFixed(2)}</span>
+              <span>max {currencySymbol}{activeTab.loyaltyCashback.toFixed(2)}</span>
             </div>
           </div>
         )}

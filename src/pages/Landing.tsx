@@ -111,7 +111,7 @@ export default function Landing() {
               <div style={{ textAlign: 'center', padding: '16px' }}>
                 <div style={{ fontSize: '2rem', marginBottom: '12px' }}>📧</div>
                 <p>Check your email for the reset link.</p>
-                <button className="btn btn-ghost" style={{ marginTop: '16px' }} onClick={() => { setShowForgot(false); setResetSent(false); setError(null); }}>
+                <button className="btn btn-primary" style={{ width: '100%', padding: '12px', marginTop: '16px' }} onClick={() => { setShowForgot(false); setResetSent(false); setError(null); }}>
                   Back to Login
                 </button>
               </div>

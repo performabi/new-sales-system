@@ -46,6 +46,7 @@ import PosTill from '../pages/pos/Till';
 import PosTransactions from '../pages/pos/Transactions';
 import LoyaltyRegister from '../pages/loyalty/Register';
 import Faq from '../pages/help/Faq';
+import Terms from '../pages/help/Terms';
 
 function LoadingSpinner() {
   return (
@@ -181,6 +182,11 @@ function AppCatchAll() {
   return <Navigate to={`/app/${slug}/dashboard`} replace />;
 }
 
+function LoyaltyRegisterWithSlug() {
+  const { slug } = useParams();
+  return <LoyaltyRegister tenantSlug={slug} />;
+}
+
 export default function AppRouter() {
   const initialize = useAuthStore((s) => s.initialize);
 
@@ -193,6 +199,7 @@ export default function AppRouter() {
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/reset-password" element={<ResetPassword />} />
+        <Route path="/terms" element={<Terms />} />
         <Route
           path="/tenant-select"
           element={
@@ -276,6 +283,7 @@ export default function AppRouter() {
         <Route path="/pos/access" element={<AdminStoreSelect />} />
         <Route path="/pos/select-store" element={<PosStoreSelect />} />
         <Route path="/loyalty/register" element={<LoyaltyRegister />} />
+        <Route path="/loyalty/:slug/register" element={<LoyaltyRegisterWithSlug />} />
 
         <Route
           path="/pos"

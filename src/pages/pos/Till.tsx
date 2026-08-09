@@ -324,6 +324,7 @@ export default function Till() {
             pinTitle={pinTitle}
             onPinSuccess={handlePinSuccess}
             onClosePin={() => { setShowPinPrompt(false); setPinCallback(null); }}
+            currencySymbol={symbol}
           />
         </div>
       </div>

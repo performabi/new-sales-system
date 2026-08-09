@@ -33,6 +33,16 @@ function mergeTenantSchema(meta: any, schema: string) {
   };
 }
 
+async function resolveTenantBySlug(server: any, slug: string) {
+  const supabaseAdmin = getSupabaseAdmin(server, 'public');
+  const { data } = await supabaseAdmin
+    .from('tenants')
+    .select('tenant_id, name, slug, schema_name')
+    .eq('slug', slug)
+    .maybeSingle();
+  return data || null;
+}
+
 function emailConflictResponse(res: any, existing: any) {
   return res.status(409).json({
     error: 'EMAIL_EXISTS',
@@ -56,13 +66,21 @@ export function apiPlugin(): Plugin {
       app.use(express.json());
       app.use((req, _, next) => {
         currentSchema = (req.query?.tenant_schema as string) || req.body?.tenant_schema;
+        if (!currentSchema && process.env.NODE_ENV !== 'production' && (req.path || '').startsWith('/api/')) {
+          const path = (req.path || '').replace(/^\/api\//, '');
+          const pub = ['public/tenants', 'app/tenant-info', 'pos/admin-login', 'auth/'];
+          const ok = pub.some((p) => path.startsWith(p));
+          if (!ok && !path.startsWith('admin/')) {
+            console.warn(`[api-plugin] request to /api/${path} did not include tenant_schema — routing to default`);
+          }
+        }
         next();
       });
 
-      // ---- Users: create ----
+      // ---- Users: create (invite via email verification link) ----
       app.post('/api/users/create', async (req, res) => {
         try {
-          const { email, password, username, full_name, role, pin, assigned_store_id, created_by, tenant_schema } = req.body;
+          const { email, username, full_name, role, pin, assigned_store_id, created_by, tenant_schema } = req.body;
           if (!/^\d{4,8}$/.test(String(pin || ''))) {
             return res.status(400).json({ error: 'PIN must be 4-8 digits' });
           }
@@ -77,6 +95,11 @@ export function apiPlugin(): Plugin {
 
           let authUserId: string;
           let linked = false;
+          let invited = false;
+          const inviteOptions: any = {
+            data: { tenant_schemas: [tenant_schema], tenant_schema, full_name: full_name || '' },
+            redirectTo: process.env.APP_URL || req.headers.origin || undefined,
+          };
 
           if (existing) {
             linked = true;
@@ -96,24 +119,21 @@ export function apiPlugin(): Plugin {
               },
             });
             if (metaError) return res.status(400).json({ error: metaError.message });
-          } else {
-            const { data: authData, error: authError } = await authAdmin.auth.admin.createUser({
-              email,
-              password,
-              email_confirm: true,
-              user_metadata: {
-                tenant_schemas: [tenant_schema],
-                tenant_schema,
-                full_name: full_name || '',
-              },
-            });
-            if (authError) {
-              return res.status(400).json({ error: authError.message });
+            if (!existing.confirmed_at) {
+              const { error: inviteError } = await authAdmin.auth.admin.inviteUserByEmail(email, inviteOptions);
+              if (inviteError) return res.status(400).json({ error: inviteError.message });
+              invited = true;
             }
-            if (!authData.user) {
+          } else {
+            const { data: inviteData, error: inviteError } = await authAdmin.auth.admin.inviteUserByEmail(email, inviteOptions);
+            if (inviteError) {
+              return res.status(400).json({ error: inviteError.message });
+            }
+            if (!inviteData?.user) {
               return res.status(400).json({ error: 'Failed to create auth user.' });
             }
-            authUserId = authData.user.id;
+            authUserId = inviteData.user.id;
+            invited = true;
           }
 
           const { data: existingRow } = await supabaseAdmin.from('users').select('user_id').eq('user_id', authUserId).maybeSingle();
@@ -140,7 +160,7 @@ export function apiPlugin(): Plugin {
             return res.status(400).json({ error: profileError.message });
           }
 
-          return res.json({ success: true, user_id: authUserId, linked });
+          return res.json({ success: true, user_id: authUserId, linked, invited });
         } catch (err) {
           console.error('Server error creating user:', err);
           return res.status(500).json({ error: 'Internal server error' });
@@ -245,6 +265,39 @@ export function apiPlugin(): Plugin {
           return res.json({ success: true });
         } catch (err) {
           console.error('Server error resetting password:', err);
+          return res.status(500).json({ error: 'Internal server error' });
+        }
+      });
+
+      // ---- Users: resend verification / recovery email ----
+      app.put('/api/users/:id/resend-invite', async (req, res) => {
+        try {
+          const { id } = req.params;
+          const authAdmin = getSupabaseAdmin(server);
+          const { data: authUser, error: getUserError } = await authAdmin.auth.admin.getUserById(id);
+          if (getUserError || !authUser?.user) return res.status(404).json({ error: 'User not found' });
+
+          const email = authUser.user.email;
+          if (!email) return res.status(400).json({ error: 'User has no email' });
+
+          if (!authUser.user.confirmed_at) {
+            const { error: inviteError } = await authAdmin.auth.admin.inviteUserByEmail(email, {
+              data: { ...(authUser.user.user_metadata || {}) },
+              redirectTo: process.env.APP_URL || req.headers.origin || undefined,
+            });
+            if (inviteError) return res.status(400).json({ error: inviteError.message });
+            return res.json({ success: true, method: 'invite' });
+          }
+
+          const env = loadEnv(server.config.mode, process.cwd(), '');
+          const anon = createClient(env.VITE_SUPABASE_URL || '', env.VITE_SUPABASE_ANON_KEY || '');
+          const { error: resetError } = await anon.auth.resetPasswordForEmail(email, {
+            redirectTo: process.env.APP_URL || req.headers.origin || undefined,
+          });
+          if (resetError) return res.status(400).json({ error: resetError.message });
+          return res.json({ success: true, method: 'recovery' });
+        } catch (err) {
+          console.error('Server error resending verification email:', err);
           return res.status(500).json({ error: 'Internal server error' });
         }
       });
@@ -826,9 +879,17 @@ export function apiPlugin(): Plugin {
       });
 
       // ---- Stores: list active stores (for POS store selection) ----
-      app.get('/api/stores', async (_req, res) => {
+      app.get('/api/stores', async (req, res) => {
         try {
-          const supabaseAdmin = getSupabaseAdmin(server);
+          let schema = (req.query.tenant_schema as string) || '';
+          const slug = (req.query.tenant_slug as string) || '';
+          if (!schema && slug) {
+            const tenant = await resolveTenantBySlug(server, slug);
+            if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+            schema = tenant.schema_name;
+          }
+          if (!schema) return res.status(400).json({ error: 'tenant_schema or tenant_slug required' });
+          const supabaseAdmin = getSupabaseAdmin(server, schema);
           const { data, error } = await supabaseAdmin.from('stores').select('*').eq('is_active', true).order('name');
           if (error) return res.status(500).json({ error: error.message });
           return res.json(data);
@@ -845,8 +906,13 @@ export function apiPlugin(): Plugin {
             return res.status(400).json({ error: 'PIN must be at least 4 digits' });
           }
 
+          const tenantSchema = (req.query.tenant_schema as string) || (req.body?.tenant_schema as string) || '';
+          if (!tenantSchema) {
+            return res.status(400).json({ error: 'tenant_schema is required' });
+          }
+
           const pinHash = crypto.createHash('sha256').update(pin).digest('hex');
-          const supabaseAdmin = getSupabaseAdmin(server);
+          const supabaseAdmin = getSupabaseAdmin(server, tenantSchema);
 
           const { data: users, error } = await supabaseAdmin
             .from('users')
@@ -861,6 +927,11 @@ export function apiPlugin(): Plugin {
           }
 
           const user = users[0];
+          const { data: authUser } = await supabaseAdmin.auth.admin.getUserById(user.user_id);
+          if (authUser?.user && !authUser.user.confirmed_at) {
+            return res.status(401).json({ error: 'Please verify your email before using the terminal' });
+          }
+
           return res.json({
             user: {
               user_id: user.user_id,
@@ -1411,7 +1482,15 @@ export function apiPlugin(): Plugin {
         try {
           const { customer_name, phone, email, cashback_balance } = req.body;
           if (!customer_name) return res.status(400).json({ error: 'customer_name required' });
-          const supabaseAdmin = getSupabaseAdmin(server);
+          let schema = (req.query.tenant_schema as string) || req.body?.tenant_schema || '';
+          const slug = req.body?.tenant_slug || (req.query.tenant_slug as string) || '';
+          if (!schema && slug) {
+            const tenant = await resolveTenantBySlug(server, slug);
+            if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
+            schema = tenant.schema_name;
+          }
+          if (!schema) return res.status(400).json({ error: 'tenant_schema or tenant_slug required' });
+          const supabaseAdmin = getSupabaseAdmin(server, schema);
 
           // Generate unique card number: LC-YYYYMMDD-XXXX
           const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -1426,6 +1505,7 @@ export function apiPlugin(): Plugin {
             customer_name: customer_name.trim(),
             phone: phone || null,
             email: email || null,
+            postcode: req.body.postcode || null,
             cashback_balance: cashback_balance ?? 0,
           }).select().single();
           if (error) return res.status(400).json({ error: error.message });
@@ -1440,8 +1520,16 @@ export function apiPlugin(): Plugin {
       app.put('/api/loyalty-cards/:id', async (req, res) => {
         try {
           const { id } = req.params;
+          const allowed = ['customer_name', 'phone', 'email', 'postcode', 'store_id', 'cashback_balance', 'is_active'];
+          const updates: any = {};
+          for (const key of allowed) {
+            if (req.body?.[key] !== undefined) updates[key] = req.body[key];
+          }
+          if (!Object.keys(updates).length) return res.status(400).json({ error: 'No valid fields to update' });
           const supabaseAdmin = getSupabaseAdmin(server);
-          const { error } = await supabaseAdmin.from('loyalty_cards').update(req.body).eq('card_id', id);
+          const { data: existing } = await supabaseAdmin.from('loyalty_cards').select('card_id').eq('card_id', id).maybeSingle();
+          if (!existing) return res.status(404).json({ error: 'Card not found' });
+          const { error } = await supabaseAdmin.from('loyalty_cards').update(updates).eq('card_id', id);
           if (error) return res.status(400).json({ error: error.message });
           return res.json({ success: true });
         } catch (err) {
@@ -1645,8 +1733,12 @@ export function apiPlugin(): Plugin {
       app.put('/api/settings/loyalty-cashback-percent', async (req, res) => {
         try {
           const { percent } = req.body;
+          const value = Number(percent);
+          if (Number.isNaN(value) || value < 0 || value > 100) {
+            return res.status(400).json({ error: 'percent must be a number between 0 and 100' });
+          }
           const supabaseAdmin = getSupabaseAdmin(server);
-          await supabaseAdmin.from('system_settings').upsert({ key: 'loyalty_cashback_percent', value: { percent }, updated_at: new Date().toISOString() }, { onConflict: 'key' });
+          await supabaseAdmin.from('system_settings').upsert({ key: 'loyalty_cashback_percent', value: { percent: value }, updated_at: new Date().toISOString() }, { onConflict: 'key' });
           return res.json({ success: true });
         } catch (err) {
           console.error('Update cashback percent error:', err);
@@ -1722,15 +1814,32 @@ export function apiPlugin(): Plugin {
       app.get('/api/app/tenant-info', async (req, res) => {
         try {
           const schema = (req.query.tenant_schema as string) || '';
-          if (!schema) return res.status(400).json({ error: 'tenant_schema required' });
+          const slug = (req.query.slug as string) || '';
+          if (!schema && !slug) return res.status(400).json({ error: 'tenant_schema or slug required' });
           const supabaseAdmin = getSupabaseAdmin(server, 'public');
-          const { data: tenant, error } = await supabaseAdmin.from('tenants')
-            .select('tenant_id, name, slug, schema_name')
-            .eq('schema_name', schema)
-            .maybeSingle();
+          let query = supabaseAdmin.from('tenants').select('tenant_id, name, slug, schema_name');
+          if (schema) query = query.eq('schema_name', schema);
+          else query = query.eq('slug', slug);
+          const { data: tenant, error } = await query.maybeSingle();
           if (error) return res.status(500).json({ error: error.message });
           if (!tenant) return res.status(404).json({ error: 'Tenant not found' });
           return res.json(tenant);
+        } catch (err) {
+          return res.status(500).json({ error: 'Internal server error' });
+        }
+      });
+
+      // ---- Public: list active tenants (for loyalty registration) ----
+      app.get('/api/public/tenants', async (_req, res) => {
+        try {
+          const supabaseAdmin = getSupabaseAdmin(server, 'public');
+          const { data, error } = await supabaseAdmin
+            .from('tenants')
+            .select('tenant_id, name, slug')
+            .eq('is_active', true)
+            .order('name');
+          if (error) return res.status(500).json({ error: error.message });
+          return res.json(data || []);
         } catch (err) {
           return res.status(500).json({ error: 'Internal server error' });
         }
