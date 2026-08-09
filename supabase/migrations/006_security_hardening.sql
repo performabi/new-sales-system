@@ -120,4 +120,4 @@ $$;
 -- =============================================
 CREATE INDEX IF NOT EXISTS idx_tenants_active ON public.tenants (is_active);
 
-RAISE NOTICE 'Security hardening applied. exec_sql dropped.';
+DO $$ BEGIN RAISE NOTICE 'Security hardening applied. exec_sql dropped.'; END $$;
