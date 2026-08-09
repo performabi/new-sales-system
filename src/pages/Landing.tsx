@@ -5,7 +5,7 @@ import { useAuthStore } from '../store/authStore';
 export default function Landing() {
   const navigate = useNavigate();
 
-  const { profile, userType, user, loading, signIn, resetPassword, isRecoveryMode } = useAuthStore();
+  const { profile, userType, user, pendingTenants, loading, signIn, resetPassword, isRecoveryMode } = useAuthStore();
   const [showForgot, setShowForgot] = useState(false);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -29,8 +29,11 @@ export default function Landing() {
 
     if (userType === 'super_admin' || userType === 'support') {
       navigate('/admin/dashboard', { replace: true });
+    } else if (pendingTenants && pendingTenants.length > 1) {
+      navigate('/tenant-select', { replace: true });
     } else if (profile) {
       if (profile.role === 'user') {
+        sessionStorage.removeItem('pos_session');
         if (profile.assigned_store_id) {
           sessionStorage.setItem('pos_store_id', profile.assigned_store_id);
           if (profile.assigned_store_name) {
@@ -41,7 +44,7 @@ export default function Landing() {
           navigate('/pos/select-store', { replace: true });
         }
       } else {
-        const schema = user?.user_metadata?.tenant_schema as string | undefined;
+        const schema = (useAuthStore.getState().activeTenantSchema || user?.user_metadata?.tenant_schema) as string | undefined;
         if (!schema) {
           navigate('/app/dashboard', { replace: true });
           return;
@@ -58,7 +61,7 @@ export default function Landing() {
         })();
       }
     }
-  }, [loading, userType, profile, isRecoveryMode, navigate]);
+  }, [loading, userType, profile, pendingTenants, isRecoveryMode, navigate]);
 
   const handleHOLogin = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();

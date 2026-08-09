@@ -20,6 +20,19 @@ function getSupabaseAdmin(server: any, schema?: string) {
   return createClient(supabaseUrl, serviceRole, opts);
 }
 
+function mergeTenantSchema(meta: any, schema: string) {
+  const current = Array.isArray(meta?.tenant_schemas)
+    ? (meta.tenant_schemas as string[])
+    : meta?.tenant_schema
+      ? [meta.tenant_schema]
+      : [];
+  return {
+    ...(meta || {}),
+    tenant_schemas: [...new Set([...current, schema])],
+    tenant_schema: meta?.tenant_schema || schema,
+  };
+}
+
 function emailConflictResponse(res: any, existing: any) {
   return res.status(409).json({
     error: 'EMAIL_EXISTS',
@@ -57,24 +70,61 @@ export function apiPlugin(): Plugin {
             return res.status(400).json({ error: 'tenant_schema is required' });
           }
           const supabaseAdmin = getSupabaseAdmin(server, tenant_schema);
+          const authAdmin = getSupabaseAdmin(server);
 
-          const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-            email,
-            password,
-            email_confirm: true,
-          });
+          const { data: listData } = await authAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+          const existing = (listData?.users || []).find((u: any) => u.email?.toLowerCase() === String(email).toLowerCase());
 
-          if (authError) {
-            return res.status(400).json({ error: authError.message });
+          let authUserId: string;
+          let linked = false;
+
+          if (existing) {
+            linked = true;
+            authUserId = existing.id;
+            const existingMeta = existing.user_metadata || {};
+            const currentSchemas = Array.isArray(existingMeta.tenant_schemas)
+              ? (existingMeta.tenant_schemas as string[])
+              : existingMeta.tenant_schema
+                ? [existingMeta.tenant_schema]
+                : [];
+            const mergedSchemas = [...new Set([...currentSchemas, tenant_schema])];
+            const { error: metaError } = await authAdmin.auth.admin.updateUserById(authUserId, {
+              user_metadata: {
+                ...existingMeta,
+                tenant_schemas: mergedSchemas,
+                tenant_schema: existingMeta.tenant_schema || tenant_schema,
+              },
+            });
+            if (metaError) return res.status(400).json({ error: metaError.message });
+          } else {
+            const { data: authData, error: authError } = await authAdmin.auth.admin.createUser({
+              email,
+              password,
+              email_confirm: true,
+              user_metadata: {
+                tenant_schemas: [tenant_schema],
+                tenant_schema,
+                full_name: full_name || '',
+              },
+            });
+            if (authError) {
+              return res.status(400).json({ error: authError.message });
+            }
+            if (!authData.user) {
+              return res.status(400).json({ error: 'Failed to create auth user.' });
+            }
+            authUserId = authData.user.id;
           }
-          if (!authData.user) {
-            return res.status(400).json({ error: 'Failed to create auth user.' });
+
+          const { data: existingRow } = await supabaseAdmin.from('users').select('user_id').eq('user_id', authUserId).maybeSingle();
+          if (existingRow) {
+            return res.status(409).json({ error: 'User is already a member of this tenant' });
           }
 
           const pinHash = crypto.createHash('sha256').update(pin).digest('hex');
 
           const { error: profileError } = await supabaseAdmin.from('users').insert({
-            user_id: authData.user.id,
+            user_id: authUserId,
             email,
             username,
             full_name,
@@ -86,11 +136,11 @@ export function apiPlugin(): Plugin {
           });
 
           if (profileError) {
-            await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
+            if (!linked) await authAdmin.auth.admin.deleteUser(authUserId);
             return res.status(400).json({ error: profileError.message });
           }
 
-          return res.json({ success: true, user_id: authData.user.id });
+          return res.json({ success: true, user_id: authUserId, linked });
         } catch (err) {
           console.error('Server error creating user:', err);
           return res.status(500).json({ error: 'Internal server error' });
@@ -1767,7 +1817,7 @@ export function apiPlugin(): Plugin {
           if (existing) return res.status(400).json({ error: 'This tenant already has a main user' });
 
           const { data: inviteData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-            data: { tenant_schema: tenant.schema_name, is_tenant_admin: true, full_name },
+            data: { ...mergeTenantSchema({}, tenant.schema_name), is_tenant_admin: true, full_name },
             redirectTo: process.env.APP_URL || req.headers.origin || undefined,
           });
           if (inviteError) return res.status(400).json({ error: inviteError.message });
@@ -1917,8 +1967,7 @@ export function apiPlugin(): Plugin {
           // Update the existing user's metadata to point to this tenant
           const { error: updateMetaError } = await supabaseAdmin.auth.admin.updateUserById(existing_user_id, {
             user_metadata: {
-              ...(user.user_metadata || {}),
-              tenant_schema: tenant.schema_name,
+              ...mergeTenantSchema(user.user_metadata || {}, tenant.schema_name),
               is_tenant_admin: true,
             },
           });
@@ -1956,7 +2005,7 @@ export function apiPlugin(): Plugin {
           // If user is unconfirmed, send invitation email
           if (!user.confirmed_at) {
             const { error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(user.email!, {
-              data: { tenant_schema: tenant.schema_name, is_tenant_admin: true },
+              data: { ...mergeTenantSchema({}, tenant.schema_name), is_tenant_admin: true },
               redirectTo: process.env.APP_URL || req.headers.origin || undefined,
             });
             if (inviteError) warning = (warning ? warning + '; ' : '') + `Invitation failed: ${inviteError.message}`;
@@ -1980,7 +2029,7 @@ export function apiPlugin(): Plugin {
 
           if (!authUser.confirmed_at) {
             const { error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(authUser.email!, {
-              data: { tenant_schema: tenant.schema_name, is_tenant_admin: true },
+              data: { ...mergeTenantSchema({}, tenant.schema_name), is_tenant_admin: true },
               redirectTo: process.env.APP_URL || req.headers.origin || undefined,
             });
             if (inviteError) return res.status(400).json({ error: inviteError.message });
@@ -2064,8 +2113,9 @@ export function apiPlugin(): Plugin {
           const tenantId = data;
 
           // Invite the admin user
+          const schemaName = `tenant_${tenantId?.toString().replace(/-/g, '')}`;
           const { data: inviteData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(admin_email, {
-            data: { tenant_schema: `tenant_${tenantId?.toString().replace(/-/g, '')}`, is_tenant_admin: true },
+            data: { ...mergeTenantSchema({}, schemaName), is_tenant_admin: true },
             redirectTo: process.env.APP_URL || req.headers.origin || undefined,
           });
 
@@ -2075,7 +2125,6 @@ export function apiPlugin(): Plugin {
 
           if (inviteData?.user) {
             // Insert into tenant's users table
-            const schemaName = `tenant_${tenantId?.toString().replace(/-/g, '')}`;
             const tenantAdmin = getSupabaseAdmin(server, schemaName);
             await tenantAdmin.from('users').insert({
               user_id: inviteData.user.id,

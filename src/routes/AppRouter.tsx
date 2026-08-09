@@ -9,6 +9,7 @@ import ForceChangePassword from '../components/Auth/ForceChangePassword';
 
 import Landing from '../pages/Landing';
 import ResetPassword from '../pages/ResetPassword';
+import TenantSelect from '../pages/TenantSelect';
 
 import AdminDashboard from '../pages/admin/Dashboard';
 import AdminTenants from '../pages/admin/Tenants';
@@ -112,7 +113,8 @@ function AdminOnlyRoute({ children }: { children: React.ReactNode }) {
 }
 
 async function fetchTenantSlug(): Promise<string | null> {
-  const schema = useAuthStore.getState().user?.user_metadata?.tenant_schema as string | undefined;
+  const state = useAuthStore.getState();
+  const schema = state.activeTenantSchema || state.user?.user_metadata?.tenant_schema as string | undefined;
   if (!schema) return null;
   try {
     const res = await fetch(`/api/app/tenant-info?tenant_schema=${encodeURIComponent(schema)}`);
@@ -191,6 +193,22 @@ export default function AppRouter() {
       <Routes>
         <Route path="/" element={<Landing />} />
         <Route path="/reset-password" element={<ResetPassword />} />
+        <Route
+          path="/tenant-select"
+          element={
+            <ProtectedRoute>
+              <TenantSelect />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/help"
+          element={
+            <ProtectedRoute>
+              <Faq />
+            </ProtectedRoute>
+          }
+        />
 
         <Route
           path="/admin"
@@ -243,7 +261,6 @@ export default function AppRouter() {
           <Route path="setup/cashback-config" element={<CashbackConfig />} />
           <Route path="loyalty-cards" element={<LoyaltyCards />} />
           <Route path="loyalty-notifications" element={<LoyaltyNotifications />} />
-          <Route path="help/faq" element={<Faq />} />
           <Route path="*" element={<AppCatchAll />} />
         </Route>
 

@@ -11,6 +11,19 @@ function getSupabaseAdmin(schema?: string) {
   return createClient(supabaseUrl, serviceRole, opts);
 }
 
+function mergeTenantSchema(meta: any, schema: string) {
+  const current = Array.isArray(meta?.tenant_schemas)
+    ? (meta.tenant_schemas as string[])
+    : meta?.tenant_schema
+      ? [meta.tenant_schema]
+      : [];
+  return {
+    ...(meta || {}),
+    tenant_schemas: [...new Set([...current, schema])],
+    tenant_schema: meta?.tenant_schema || schema,
+  };
+}
+
 function emailConflictResponse(res: VercelResponse, existing: any) {
   return res.status(409).json({
     error: 'EMAIL_EXISTS',
@@ -176,20 +189,56 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       if (path[1] === 'create' && method === 'POST') {
         const { email, password, username, full_name, role, pin, assigned_store_id, created_by } = body;
-        const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({ email, password, email_confirm: true });
-        if (authError) return res.status(400).json({ error: authError.message });
-        if (!authData.user) return res.status(400).json({ error: 'Failed to create auth user.' });
+        const schema = (req.query.tenant_schema as string) || (body.tenant_schema as string);
+        const authAdmin = getSupabaseAdmin();
+        const { data: listData } = await authAdmin.auth.admin.listUsers({ page: 1, perPage: 1000 });
+        const existing = (listData?.users || []).find((u: any) => u.email?.toLowerCase() === String(email).toLowerCase());
+
+        let authUserId: string;
+        let linked = false;
+
+        if (existing) {
+          linked = true;
+          authUserId = existing.id;
+          const existingMeta = existing.user_metadata || {};
+          const currentSchemas = Array.isArray(existingMeta.tenant_schemas)
+            ? (existingMeta.tenant_schemas as string[])
+            : existingMeta.tenant_schema
+              ? [existingMeta.tenant_schema]
+              : [];
+          const mergedSchemas = [...new Set([...currentSchemas, schema])];
+          const { error: metaError } = await authAdmin.auth.admin.updateUserById(authUserId, {
+            user_metadata: {
+              ...existingMeta,
+              tenant_schemas: mergedSchemas,
+              tenant_schema: existingMeta.tenant_schema || schema,
+            },
+          });
+          if (metaError) return res.status(400).json({ error: metaError.message });
+        } else {
+          const { data: authData, error: authError } = await authAdmin.auth.admin.createUser({
+            email, password, email_confirm: true,
+            user_metadata: { tenant_schemas: [schema], tenant_schema: schema, full_name: full_name || '' },
+          });
+          if (authError) return res.status(400).json({ error: authError.message });
+          if (!authData.user) return res.status(400).json({ error: 'Failed to create auth user.' });
+          authUserId = authData.user.id;
+        }
+
+        const { data: existingRow } = await supabaseAdmin.from('users').select('user_id').eq('user_id', authUserId).maybeSingle();
+        if (existingRow) return res.status(409).json({ error: 'User is already a member of this tenant' });
+
         const pinHash = crypto.createHash('sha256').update(pin).digest('hex');
         const { error: profileError } = await supabaseAdmin.from('users').insert({
-          user_id: authData.user.id, email, username, full_name, role,
+          user_id: authUserId, email, username, full_name, role,
           pin_hash: pinHash, is_active: true, assigned_store_id: assigned_store_id || null,
           created_by: created_by || null,
         });
         if (profileError) {
-          await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
+          if (!linked) await authAdmin.auth.admin.deleteUser(authUserId);
           return res.status(400).json({ error: profileError.message });
         }
-        return res.json({ success: true, user_id: authData.user.id });
+        return res.json({ success: true, user_id: authUserId, linked });
       }
       if (path[1] && method === 'PUT' && path[2] !== 'reset-password') {
         const { email, password, username, full_name, role, is_active, assigned_store_id, pin } = body;
@@ -911,7 +960,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (existing) return res.status(400).json({ error: 'This tenant already has a main user' });
 
       const { data: inviteData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-        data: { tenant_schema: tenant.schema_name, is_tenant_admin: true, full_name },
+        data: { ...mergeTenantSchema({}, tenant.schema_name), is_tenant_admin: true, full_name },
         redirectTo: process.env.APP_URL || req.headers.origin || undefined,
       });
       if (inviteError) return res.status(400).json({ error: inviteError.message });
@@ -1046,8 +1095,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // Update the existing user's metadata to point to this tenant
       const { error: updateMetaError } = await supabaseAdmin.auth.admin.updateUserById(existing_user_id, {
         user_metadata: {
-          ...(user.user_metadata || {}),
-          tenant_schema: tenant.schema_name,
+          ...mergeTenantSchema(user.user_metadata || {}, tenant.schema_name),
           is_tenant_admin: true,
         },
       });
@@ -1085,7 +1133,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       // If user is unconfirmed, send invitation email
       if (!user.confirmed_at) {
         const { error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(user.email!, {
-          data: { tenant_schema: tenant.schema_name, is_tenant_admin: true },
+          data: { ...mergeTenantSchema({}, tenant.schema_name), is_tenant_admin: true },
           redirectTo: process.env.APP_URL || req.headers.origin || undefined,
         });
         if (inviteError) warning = (warning ? warning + '; ' : '') + `Invitation failed: ${inviteError.message}`;
@@ -1104,7 +1152,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (!authUser.confirmed_at) {
         const { error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(authUser.email!, {
-          data: { tenant_schema: tenant.schema_name, is_tenant_admin: true },
+          data: { ...mergeTenantSchema({}, tenant.schema_name), is_tenant_admin: true },
           redirectTo: process.env.APP_URL || req.headers.origin || undefined,
         });
         if (inviteError) return res.status(400).json({ error: inviteError.message });
@@ -1167,7 +1215,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (provisionError) return res.status(400).json({ error: provisionError.message });
       const schemaName = `tenant_${tenantId?.toString().replace(/-/g, '')}`;
       const { data: inviteData, error: inviteError } = await supabaseAdmin.auth.admin.inviteUserByEmail(admin_email, {
-        data: { tenant_schema: schemaName, is_tenant_admin: true },
+        data: { ...mergeTenantSchema({}, schemaName), is_tenant_admin: true },
         redirectTo: process.env.APP_URL || req.headers.origin || undefined,
       });
       if (inviteError) {

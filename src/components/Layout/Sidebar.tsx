@@ -214,8 +214,8 @@ export default function Sidebar() {
 
       <div className="sidebar-footer">
         <button
-          className={`nav-item ${isActive(prefixPath('/app/help/faq')) ? 'active' : ''}`}
-          onClick={() => navigate(prefixPath('/app/help/faq'))}
+          className="nav-item"
+          onClick={() => window.open('/help', '_blank', 'noopener')}
           title={sidebarCollapsed ? 'FAQ & Support' : undefined}
         >
           <span className="nav-icon">❓</span>

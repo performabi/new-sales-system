@@ -13,6 +13,8 @@ interface AuthState {
   userType: UserType;
   loading: boolean;
   isRecoveryMode: boolean;
+  activeTenantSchema: string | null;
+  pendingTenants: string[] | null;
   setSession: (session: Session | null) => void;
   setProfile: (profile: UserProfile | null) => void;
   setSuperUser: (superUser: SuperUser | null) => void;
@@ -23,6 +25,7 @@ interface AuthState {
   changePassword: (newPassword: string) => Promise<{ error: string | null }>;
   resetPassword: (email: string) => Promise<{ error: string | null }>;
   updatePassword: (newPassword: string) => Promise<{ error: string | null }>;
+  selectTenant: (schema: string) => Promise<{ slug: string | null; role: string | null; error: string | null }>;
 }
 
 let authListenerRegistered = false;
@@ -51,6 +54,8 @@ export const useAuthStore = create<AuthState>((set, get) => ({
   userType: null,
   loading: true,
   isRecoveryMode: false,
+  activeTenantSchema: null,
+  pendingTenants: null,
 
   setSession: (session) => set({ session, user: session?.user ?? null }),
   setProfile: (profile) => set({ profile }),
@@ -136,7 +141,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     sessionStorage.removeItem('pos_session');
     sessionStorage.removeItem('pos_store_id');
     sessionStorage.removeItem('pos_store_name');
-    set({ session: null, user: null, profile: null, superUser: null, userType: null });
+    set({ session: null, user: null, profile: null, superUser: null, userType: null, activeTenantSchema: null, pendingTenants: null });
   },
 
   changePassword: async (newPassword) => {
@@ -148,7 +153,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       if (data.user) {
         const state = get();
-        const tenantSchema = state.user?.user_metadata?.tenant_schema;
+        const tenantSchema = state.activeTenantSchema || state.user?.user_metadata?.tenant_schema;
         if (tenantSchema) {
           const tenantClient = getSupabaseClient(tenantSchema);
           const { error: dbError } = await tenantClient
@@ -194,6 +199,36 @@ export const useAuthStore = create<AuthState>((set, get) => ({
       return { error: null };
     } catch (err) {
       return { error: (err as Error).message };
+    }
+  },
+
+  selectTenant: async (schema) => {
+    const { user } = get();
+    if (!user) return { slug: null, role: null, error: 'No active session' };
+    try {
+      const profile = await resolveTenantProfile(user, schema);
+      if (!profile) return { slug: null, role: null, error: 'No profile found for this tenant' };
+      const raw = profile as UserProfile & { stores?: { name: string } | null };
+      set({
+        profile: { ...raw, assigned_store_name: raw.stores?.name ?? undefined },
+        superUser: null,
+        userType: raw.role === 'admin' ? 'tenant_admin' : 'tenant_user',
+        activeTenantSchema: schema,
+        pendingTenants: null,
+      });
+      let slug: string | null = null;
+      try {
+        const res = await fetch(`/api/app/tenant-info?tenant_schema=${encodeURIComponent(schema)}`);
+        if (res.ok) {
+          const tenant = await res.json();
+          slug = (tenant.slug as string) || null;
+        }
+      } catch {
+        // slug is optional — page can fall back to /app/dashboard
+      }
+      return { slug, role: raw.role, error: null };
+    } catch (err) {
+      return { slug: null, role: null, error: (err as Error).message };
     }
   },
 }));
@@ -248,9 +283,44 @@ async function resolveUserType(
   }
 
   // Check if tenant user (has tenant_schema in metadata)
-  const tenantSchema = meta.tenant_schema;
-  if (tenantSchema) {
-    const tenantClient = getSupabaseClient(tenantSchema);
+  const schemas =
+    Array.isArray(meta.tenant_schemas) && (meta.tenant_schemas as string[]).length > 0
+      ? (meta.tenant_schemas as string[])
+      : meta.tenant_schema
+        ? [meta.tenant_schema]
+        : [];
+
+  if (schemas.length > 1) {
+    // Multiple tenants — require the user to pick one before resolving a profile
+    set({ profile: null, superUser: null, userType: null, activeTenantSchema: null, pendingTenants: schemas });
+    return;
+  }
+
+  if (schemas.length === 1) {
+    const profile = await resolveTenantProfile(user, schemas[0]);
+    if (profile) {
+      const raw = profile as UserProfile & { stores?: { name: string } | null };
+      set({
+        profile: { ...raw, assigned_store_name: raw.stores?.name ?? undefined },
+        superUser: null,
+        userType: raw.role === 'admin' ? 'tenant_admin' : 'tenant_user',
+        activeTenantSchema: schemas[0],
+        pendingTenants: null,
+      });
+      return;
+    }
+  }
+
+  // No match found — user exists in auth but not in our tables
+  set({ profile: null, superUser: null, userType: null, activeTenantSchema: null, pendingTenants: null });
+}
+
+async function resolveTenantProfile(
+  user: User,
+  schema: string,
+): Promise<(UserProfile & { stores?: { name: string } | null }) | null> {
+  try {
+    const tenantClient = getSupabaseClient(schema);
     const { data: profile } = await withTimeout(
       tenantClient
         .from('users')
@@ -260,20 +330,10 @@ async function resolveUserType(
       3000,
       'tenant users query',
     );
-
-    if (profile) {
-      const raw = profile as UserProfile & { stores?: { name: string } | null };
-      set({
-        profile: { ...raw, assigned_store_name: raw.stores?.name ?? undefined },
-        superUser: null,
-        userType: raw.role === 'admin' ? 'tenant_admin' : 'tenant_user',
-      });
-      return;
-    }
+    return (profile as (UserProfile & { stores?: { name: string } | null }) | null) ?? null;
+  } catch {
+    return null;
   }
-
-  // No match found — user exists in auth but not in our tables
-  set({ profile: null, superUser: null, userType: null });
 }
 
 function withTimeout<T>(promise: PromiseLike<T>, ms: number, label: string): Promise<T> {

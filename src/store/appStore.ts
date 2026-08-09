@@ -4,23 +4,25 @@ import type { Store, UserProfile, InventoryItem, Toast, PluCategory, Plu, Suppli
 import { getSupabaseClient } from '../lib/supabaseClient';
 import { useAuthStore } from './authStore';
 
-function getClient() {
+function getActiveSchema(): string | undefined {
   const auth = useAuthStore.getState();
-  const schema = auth.user?.user_metadata?.tenant_schema as string | undefined;
+  return auth.activeTenantSchema || (auth.user?.user_metadata?.tenant_schema as string | undefined);
+}
+
+function getClient() {
+  const schema = getActiveSchema();
   return getSupabaseClient(schema);
 }
 
 function apiFetch(path: string, options?: RequestInit) {
-  const auth = useAuthStore.getState();
-  const schema = auth.user?.user_metadata?.tenant_schema as string | undefined;
+  const schema = getActiveSchema();
   const separator = path.includes('?') ? '&' : '?';
   const url = schema ? `${path}${separator}tenant_schema=${encodeURIComponent(schema)}` : path;
   return fetch(url, options);
 }
 
 function getSchemaParam(): string {
-  const auth = useAuthStore.getState();
-  const schema = auth.user?.user_metadata?.tenant_schema as string | undefined;
+  const schema = getActiveSchema();
   return schema ? `tenant_schema=${encodeURIComponent(schema)}` : '';
 }
 
@@ -391,7 +393,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     try {
       const auth = useAuthStore.getState();
       const createdById = auth.profile?.user_id || null;
-      const tenantSchema = auth.user?.user_metadata?.tenant_schema as string;
+      const tenantSchema = getActiveSchema() as string;
       const response = await apiFetch('/api/users/create', {
         method: 'POST',
         headers: {
@@ -435,7 +437,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   updateUser: async (id, data) => {
     try {
       const oldUser = get().users.find((u) => u.user_id === id);
-      const tenantSchema = useAuthStore.getState().user?.user_metadata?.tenant_schema as string;
+      const tenantSchema = getActiveSchema() as string;
       const response = await apiFetch(`/api/users/${id}`, {
         method: 'PUT',
         headers: {
@@ -515,7 +517,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   resetUserPassword: async (id, newPassword?: string) => {
     try {
       const targetUser = get().users.find((u) => u.user_id === id);
-      const tenantSchema = useAuthStore.getState().user?.user_metadata?.tenant_schema as string;
+      const tenantSchema = getActiveSchema() as string;
       const response = await apiFetch(`/api/users/${id}/reset-password`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },

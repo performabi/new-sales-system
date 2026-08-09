@@ -55,24 +55,74 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     db: { schema: tenant_schema },
   });
 
-  const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
+  const supabaseAuth = createClient(supabaseUrl, serviceRole, {
+    auth: { autoRefreshToken: false, persistSession: false },
   });
-  if (authError) {
-    res.status(400).json({ error: authError.message });
+
+  const { data: listData, error: listError } = await supabaseAuth.auth.admin.listUsers({ page: 1, perPage: 1000 });
+  if (listError) {
+    res.status(500).json({ error: listError.message });
     return;
   }
-  if (!authData?.user) {
-    res.status(400).json({ error: 'Failed to create auth user' });
+  const existing = (listData?.users || []).find((u) => u.email?.toLowerCase() === String(email).toLowerCase());
+
+  let authUserId: string;
+  let linked = false;
+
+  if (existing) {
+    linked = true;
+    authUserId = existing.id;
+    const existingMeta = existing.user_metadata || {};
+    const currentSchemas = Array.isArray(existingMeta.tenant_schemas)
+      ? (existingMeta.tenant_schemas as string[])
+      : existingMeta.tenant_schema
+        ? [existingMeta.tenant_schema]
+        : [];
+    const mergedSchemas = [...new Set([...currentSchemas, tenant_schema])];
+
+    const { error: metaError } = await supabaseAuth.auth.admin.updateUserById(authUserId, {
+      user_metadata: {
+        ...existingMeta,
+        tenant_schemas: mergedSchemas,
+        tenant_schema: existingMeta.tenant_schema || tenant_schema,
+      },
+    });
+    if (metaError) {
+      res.status(400).json({ error: metaError.message });
+      return;
+    }
+  } else {
+    const { data: authData, error: authError } = await supabaseAuth.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: {
+        tenant_schemas: [tenant_schema],
+        tenant_schema,
+        full_name: full_name || '',
+      },
+    });
+    if (authError) {
+      res.status(400).json({ error: authError.message });
+      return;
+    }
+    if (!authData?.user) {
+      res.status(400).json({ error: 'Failed to create auth user' });
+      return;
+    }
+    authUserId = authData.user.id;
+  }
+
+  const { data: existingRow } = await supabaseAdmin.from('users').select('user_id').eq('user_id', authUserId).maybeSingle();
+  if (existingRow) {
+    res.status(409).json({ error: 'User is already a member of this tenant' });
     return;
   }
 
   const pinHash = crypto.createHash('sha256').update(pin).digest('hex');
 
   const { error: profileError } = await supabaseAdmin.from('users').insert({
-    user_id: authData.user.id,
+    user_id: authUserId,
     email,
     username,
     full_name,
@@ -84,10 +134,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   });
 
   if (profileError) {
-    await supabaseAdmin.auth.admin.deleteUser(authData.user.id);
+    if (!linked) {
+      await supabaseAuth.auth.admin.deleteUser(authUserId);
+    }
     res.status(400).json({ error: profileError.message });
     return;
   }
 
-  res.status(200).json({ success: true, user_id: authData.user.id });
+  res.status(200).json({ success: true, user_id: authUserId, linked });
 }
