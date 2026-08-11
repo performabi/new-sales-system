@@ -190,15 +190,20 @@ export function isPublicPath(method: string, path: string): boolean {
 // ---------------- POS login rate limiting (DB-backed, serverless-safe) ----------------
 
 export async function isPosLoginThrottled(env: AuthEnv, identifier: string): Promise<boolean> {
-  const client = getAdminClient(env, 'public');
-  const since = new Date(Date.now() - 15 * 60 * 1000).toISOString();
-  const { count } = await client
-    .from('pos_login_attempts')
-    .select('attempt_id', { count: 'exact', head: true })
-    .eq('identifier', identifier)
-    .eq('success', false)
-    .gte('attempted_at', since);
-  return (count ?? 0) >= 10;
+  try {
+    const client = getAdminClient(env, 'public');
+    const since = new Date(Date.now() - 15 * 60 * 1000).toISOString();
+    const { count } = await client
+      .from('pos_login_attempts')
+      .select('attempt_id', { count: 'exact', head: true })
+      .eq('identifier', identifier)
+      .eq('success', false)
+      .gte('attempted_at', since);
+    return (count ?? 0) >= 10;
+  } catch {
+    // fail open: never block logins because of throttling infrastructure
+    return false;
+  }
 }
 
 export async function recordPosAttempt(env: AuthEnv, identifier: string, success: boolean, ip?: string): Promise<void> {

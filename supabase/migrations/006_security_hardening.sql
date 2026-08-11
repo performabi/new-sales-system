@@ -7,8 +7,15 @@
 -- =============================================
 -- 1. REMOVE exec_sql RCE HELPER
 --    SECURITY DEFINER raw-SQL RPC, exposed to anon.
+--    REVOKE is guarded so the script is safe to re-run
+--    after exec_sql has already been dropped.
 -- =============================================
-REVOKE ALL ON FUNCTION public.exec_sql(TEXT) FROM PUBLIC;
+DO $$
+BEGIN
+  IF to_regprocedure('public.exec_sql(text)') IS NOT NULL THEN
+    REVOKE ALL ON FUNCTION public.exec_sql(TEXT) FROM PUBLIC;
+  END IF;
+END $$;
 DROP FUNCTION IF EXISTS public.exec_sql(TEXT);
 
 -- =============================================
@@ -25,6 +32,7 @@ CREATE TABLE IF NOT EXISTS public.pos_login_attempts (
 CREATE INDEX IF NOT EXISTS idx_pos_login_attempts_identifier
   ON public.pos_login_attempts (identifier, attempted_at DESC);
 REVOKE ALL ON public.pos_login_attempts FROM anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.pos_login_attempts TO service_role;
 ALTER TABLE public.pos_login_attempts ENABLE ROW LEVEL SECURITY;
 
 -- =============================================
