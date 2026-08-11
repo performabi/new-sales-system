@@ -39,8 +39,7 @@ import Sales from '../pages/app/Sales';
 import Reporting from '../pages/app/Reporting';
 
 import PosDashboard from '../pages/pos/Dashboard';
-import PosStoreSelect from '../pages/pos/StoreSelect';
-import AdminStoreSelect from '../pages/pos/AdminStoreSelect';
+import PosEntry from '../pages/pos/PosEntry';
 import PosClock from '../pages/pos/Clock';
 import PosChecklists from '../pages/pos/Checklists';
 import PosGoodsIn from '../pages/pos/GoodsIn';
@@ -286,8 +285,8 @@ export default function AppRouter() {
           }
         />
 
-        <Route path="/pos/access" element={<AdminStoreSelect />} />
-        <Route path="/pos/select-store" element={<PosStoreSelect />} />
+        <Route path="/pos/access" element={<PosEntry />} />
+        <Route path="/pos/select-store" element={<PosEntry />} />
         <Route path="/loyalty/register" element={<LoyaltyRegister />} />
         <Route path="/loyalty/:slug/register" element={<LoyaltyRegisterWithSlug />} />
 

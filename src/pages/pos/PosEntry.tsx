@@ -1,3 +1,6 @@
+// src/pages/pos/PosEntry.tsx
+// PIN-first terminal entry: standard users open their assigned store;
+// admins (super_users) pick a tenant + store after PIN verification.
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -15,7 +18,7 @@ interface PosStore {
   store_number?: string | null;
 }
 
-export default function AdminStoreSelect() {
+export default function PosEntry() {
   const [step, setStep] = useState<'pin' | 'store'>('pin');
   const [pin, setPin] = useState('');
   const [pinError, setPinError] = useState('');
@@ -55,10 +58,10 @@ export default function AdminStoreSelect() {
     setSubmitting(true);
     setPinError('');
     try {
-      const res = await fetch('/api/pos/admin-login', {
+      const res = await fetch('/api/pos/pin-login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin, verify_only: true }),
+        body: JSON.stringify({ pin }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -67,15 +70,21 @@ export default function AdminStoreSelect() {
         setSubmitting(false);
         return;
       }
-      if (data.pending_token) {
-        sessionStorage.setItem('pos_token', data.pending_token);
-      }
+      sessionStorage.setItem('pos_token', data.pending_token || data.pos_token);
       sessionStorage.setItem('pos_user_id', data.user.user_id);
       sessionStorage.setItem('pos_user_name', data.user.full_name || '');
       sessionStorage.setItem('pos_user_role', data.user.role);
       setPin('');
       setSubmitting(false);
-      fetchTenants();
+      if (data.kind === 'admin') {
+        fetchTenants();
+      } else {
+        sessionStorage.setItem('pos_store_id', data.user.assigned_store_id);
+        if (data.user.assigned_store_name) {
+          sessionStorage.setItem('pos_store_name', data.user.assigned_store_name);
+        }
+        navigate('/pos/dashboard', { replace: true });
+      }
     } catch {
       setPinError('Network error');
       setSubmitting(false);
@@ -167,7 +176,7 @@ export default function AdminStoreSelect() {
             </div>
 
             {pinError && (
-              <div style={{ color: 'var(--error)', fontSize: '0.85rem', marginBottom: '12px' }}>{pinError}</div>
+              <div style={{ color: 'var(--danger)', fontSize: '0.85rem', marginBottom: '12px' }}>{pinError}</div>
             )}
 
             <div style={{
@@ -203,7 +212,7 @@ export default function AdminStoreSelect() {
                 style={{ fontSize: '0.8rem', padding: '14px' }}
                 onClick={handleBackspace}
               >
-                \u232b
+                {'\u232b'}
               </button>
             </div>
 
@@ -295,7 +304,7 @@ export default function AdminStoreSelect() {
             style={{ marginTop: '24px' }}
             onClick={() => { setStep('pin'); setPin(''); setPinError(''); setSelectedTenant(null); setStores([]); }}
           >
-            \u2190 Back to PIN entry
+            {'\u2190 Back to PIN entry'}
           </button>
         </>
       )}

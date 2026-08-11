@@ -178,6 +178,7 @@ export async function isSuperAdminUser(env: AuthEnv, userId: string): Promise<bo
 
 export function isPublicPath(method: string, path: string): boolean {
   if (path === 'pos/login') return true;
+  if (path === 'pos/pin-login') return true;
   if (path === 'pos/admin-login') return true;
   if (path === 'app/tenant-info') return true;
   if (path === 'public/tenants') return true;

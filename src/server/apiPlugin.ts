@@ -1072,6 +1072,108 @@ export function apiPlugin(): Plugin {
         }
       });
 
+      // ---- POS: Unified PIN entry (PIN-first terminal) ----
+      // Standard users: PIN matches a tenant user → opens their assigned store.
+      // Admins: PIN matches a super_user → pending token drives the store-selection UI.
+      app.post('/api/pos/pin-login', async (req, res) => {
+        try {
+          const { pin } = req.body;
+          if (!/^\d{4,8}$/.test(String(pin || ''))) {
+            return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+          }
+
+          const identifier = `pin:${String(pin).length}`;
+          if (await isPosLoginThrottled(authEnv, identifier)) {
+            return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+          }
+
+          const supabasePublic = getSupabaseAdmin(server, 'public');
+
+          // ---- Admin path: platform super users ----
+          const { data: suList } = await supabasePublic
+            .from('super_users')
+            .select('super_user_id, email, full_name, pin_hash, role')
+            .eq('is_active', true);
+          const su = (suList || []).find((u: any) => verifyPin(String(pin), u.pin_hash).ok);
+          if (su) {
+            const check = verifyPin(String(pin), su.pin_hash);
+            if (check.upgradedHash) {
+              await supabasePublic.from('super_users').update({ pin_hash: check.upgradedHash }).eq('super_user_id', su.super_user_id);
+            }
+            await recordPosAttempt(authEnv, identifier, true, requestIp(req));
+            const pendingToken = signPosToken(authEnv, {
+              uid: su.super_user_id,
+              schema: 'public',
+              store_id: 'pending',
+              role: 'super_admin',
+            });
+            return res.json({
+              kind: 'admin',
+              pending_token: pendingToken,
+              user: { user_id: su.super_user_id, full_name: su.full_name, role: 'super_admin' },
+            });
+          }
+
+          // ---- Standard-user path: scan active tenants for a matching user PIN ----
+          const { data: tenants } = await supabasePublic.from('tenants').select('schema_name').eq('is_active', true);
+          for (const tenant of tenants || []) {
+            const schema = tenant.schema_name;
+            const tenantAdmin = getSupabaseAdmin(server, schema);
+            const { data: users } = await tenantAdmin
+              .from('users')
+              .select('user_id, username, full_name, role, pin_hash, is_active, assigned_store_id, stores!assigned_store_id(name)')
+              .eq('is_active', true);
+            if (!users || users.length === 0) continue;
+
+            const user = users.find((u: any) => verifyPin(String(pin), u.pin_hash).ok);
+            if (!user) continue;
+
+            const check = verifyPin(String(pin), user.pin_hash);
+            if (check.upgradedHash) {
+              await tenantAdmin.from('users').update({ pin_hash: check.upgradedHash }).eq('user_id', user.user_id);
+            }
+
+            const { data: authUser } = await supabasePublic.auth.admin.getUserById(user.user_id);
+            if (authUser?.user && !authUser.user.confirmed_at) {
+              await recordPosAttempt(authEnv, identifier, false, requestIp(req));
+              return res.status(401).json({ error: 'Please verify your email before using the terminal' });
+            }
+
+            if (!user.assigned_store_id) {
+              await recordPosAttempt(authEnv, identifier, true, requestIp(req));
+              return res.status(403).json({ error: 'You have no assigned store — ask an admin to assign one.' });
+            }
+
+            await recordPosAttempt(authEnv, identifier, true, requestIp(req));
+            const posToken = signPosToken(authEnv, {
+              uid: user.user_id,
+              schema,
+              store_id: user.assigned_store_id,
+              role: user.role,
+            });
+            return res.json({
+              kind: 'user',
+              user: {
+                user_id: user.user_id,
+                username: user.username,
+                full_name: user.full_name,
+                role: user.role,
+                assigned_store_id: user.assigned_store_id,
+                assigned_store_name: (user.stores as any)?.name || null,
+              },
+              pos_token: posToken,
+              expires_in: 43200,
+            });
+          }
+
+          await recordPosAttempt(authEnv, identifier, false, requestIp(req));
+          return res.status(401).json({ error: 'Invalid PIN' });
+        } catch (err) {
+          console.error('POS PIN login error:', err);
+          return res.status(500).json({ error: 'Internal server error' });
+        }
+      });
+
       // ---- POS: Admin PIN Login (checks super_users, accepts store_id) ----
       app.post('/api/pos/admin-login', async (req, res) => {
         try {
