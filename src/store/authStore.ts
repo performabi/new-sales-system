@@ -102,13 +102,19 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
       await Promise.race([
         (async () => {
-          // getUser() awaits storage restore + auto-refresh (getSession() alone
-          // resolves null on a fresh load even with a valid stored session).
+          // getUser() validates the access token server-side (and auto-refreshes
+          // when possible). Only trust a restored session if that validation
+          // succeeds — otherwise the app would render "logged in" while every
+          // API call fails with 401 (stale/expired session).
           const { data: { user } } = await supabase.auth.getUser();
           const { data: { session } } = await supabase.auth.getSession();
-          set({ session, user: session?.user ?? null });
-          if (user || session?.user) {
-            await resolveUserTypeOnce((user || session?.user)! as never, supabase, set);
+          if (user && session) {
+            set({ session, user: session.user ?? null });
+            await resolveUserTypeOnce(session.user, supabase, set);
+          } else if (session) {
+            // Stored session exists but the token is invalid or unrefreshable.
+            await supabase.auth.signOut();
+            set({ session: null, user: null, profile: null, superUser: null, userType: null, activeTenantSchema: null, pendingTenants: null });
           }
         })(),
         new Promise<void>((resolve) => setTimeout(resolve, 4000)),

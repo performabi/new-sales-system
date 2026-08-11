@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import { hashPin, resolveIdentity, identityHasSchema, defaultSchemaFor } from '../../src/server/apiAuth.js';
+import { hashPin, verifyPin, resolveIdentity, identityHasSchema, defaultSchemaFor } from '../../src/server/apiAuth.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { id } = req.query as { id: string };
@@ -97,6 +97,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       if (pin && !/^\d{4,8}$/.test(String(pin))) {
         return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+      }
+      if (pin) {
+        const { data: tenantUsers } = await supabaseAdmin.from('users').select('user_id, pin_hash').not('pin_hash', 'is', null).neq('user_id', id);
+        if ((tenantUsers || []).some((u: any) => verifyPin(String(pin), u.pin_hash).ok)) {
+          return res.status(400).json({ error: 'This PIN is already in use by another user in this tenant' });
+        }
       }
 
       const authUpdates: Record<string, string> = {};

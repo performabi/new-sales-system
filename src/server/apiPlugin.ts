@@ -228,6 +228,12 @@ export function apiPlugin(): Plugin {
             return res.status(409).json({ error: 'User is already a member of this tenant' });
           }
 
+          // Tenant PINs must be unique (salted hashes -> verify each existing hash)
+          const { data: tenantUsers } = await supabaseAdmin.from('users').select('pin_hash').not('pin_hash', 'is', null);
+          if ((tenantUsers || []).some((u: any) => verifyPin(String(pin), u.pin_hash).ok)) {
+            return res.status(400).json({ error: 'This PIN is already in use by another user in this tenant' });
+          }
+
           const pinHash = hashPin(pin);
 
           const { error: profileError } = await supabaseAdmin.from('users').insert({
@@ -266,6 +272,13 @@ export function apiPlugin(): Plugin {
             return res.status(400).json({ error: 'tenant_schema is required' });
           }
           const supabaseAdmin = getSupabaseAdmin(server, tenant_schema);
+
+          if (pin) {
+            const { data: tenantUsers } = await supabaseAdmin.from('users').select('user_id, pin_hash').not('pin_hash', 'is', null).neq('user_id', id);
+            if ((tenantUsers || []).some((u: any) => verifyPin(String(pin), u.pin_hash).ok)) {
+              return res.status(400).json({ error: 'This PIN is already in use by another user in this tenant' });
+            }
+          }
 
           const authUpdates: any = {};
           if (email) authUpdates.email = email;

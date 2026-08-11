@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { hashPin, resolveIdentity, identityHasSchema } from '../../src/server/apiAuth.js';
+import { hashPin, verifyPin, resolveIdentity, identityHasSchema } from '../../src/server/apiAuth.js';
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
 const serviceRole = process.env.SERVICE_ROLE || '';
@@ -63,6 +63,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     auth: { autoRefreshToken: false, persistSession: false },
     db: { schema: tenant_schema },
   });
+
+  // Tenant PINs must be unique (salted hashes -> verify each existing hash)
+  const { data: tenantUsers } = await supabaseAdmin.from('users').select('pin_hash').not('pin_hash', 'is', null);
+  if ((tenantUsers || []).some((u: any) => verifyPin(String(pin), u.pin_hash).ok)) {
+    res.status(400).json({ error: 'This PIN is already in use by another user in this tenant' });
+    return;
+  }
 
   const supabaseAuth = createClient(supabaseUrl, serviceRole, {
     auth: { autoRefreshToken: false, persistSession: false },

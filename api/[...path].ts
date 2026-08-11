@@ -295,6 +295,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const { data: existingRow } = await supabaseAdmin.from('users').select('user_id').eq('user_id', authUserId).maybeSingle();
         if (existingRow) return res.status(409).json({ error: 'User is already a member of this tenant' });
 
+        // Tenant PINs must be unique (salted hashes -> verify each existing hash)
+        const { data: tenantUsers } = await supabaseAdmin.from('users').select('pin_hash').not('pin_hash', 'is', null);
+        if ((tenantUsers || []).some((u: any) => verifyPin(String(pin), u.pin_hash).ok)) {
+          return res.status(400).json({ error: 'This PIN is already in use by another user in this tenant' });
+        }
+
         const pinHash = hashPin(pin);
         const { error: profileError } = await supabaseAdmin.from('users').insert({
           user_id: authUserId, email, username, full_name, role,
@@ -309,6 +315,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       if (path[1] && method === 'PUT' && path[2] !== 'reset-password' && path[2] !== 'resend-invite') {
         const { email, password, username, full_name, role, is_active, assigned_store_id, pin } = body;
+        if (pin && !/^\d{4,8}$/.test(String(pin))) {
+          return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+        }
+        if (pin) {
+          const { data: tenantUsers } = await supabaseAdmin.from('users').select('user_id, pin_hash').not('pin_hash', 'is', null).neq('user_id', path[1]);
+          if ((tenantUsers || []).some((u: any) => verifyPin(String(pin), u.pin_hash).ok)) {
+            return res.status(400).json({ error: 'This PIN is already in use by another user in this tenant' });
+          }
+        }
         const authUpdates: any = {};
         if (email) authUpdates.email = email;
         if (password) authUpdates.password = password;

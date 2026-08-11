@@ -5,6 +5,34 @@
 Status legend: [ ] = not started   [~] = in progress   [x] = done   [!] = blocked
 
 ================================================================================
+PHASE 0c — Session hardening (phantom logged-in state fix)
+================================================================================
+
+[x] 0c.1 authStore.init: only trust a restored session when supabase.auth
+       getUser() validates the access token; if validation fails but a
+       stored session exists -> signOut() + clear state (redirect to login)
+       instead of rendering the app with 401s on every call
+[x] 0c.2 apiFetch (src/lib/api.ts): on 401 from a non-public endpoint when a
+       Bearer token was attached -> global signOut + redirect to "/"
+       Public paths (pos/login, pos/pin-login, pos/admin-login,
+       app/tenant-info, public/tenants, loyalty-cards/create, GET stores)
+       are exempt so wrong-PIN 401s behave normally
+
+================================================================================
+PHASE 0d — Tenant PIN policy (unique per tenant, admin + staff)
+================================================================================
+
+[x] 0d.1 Uniqueness enforced server-side on every PIN write (salted hashes
+       make DB constraints impossible; verifyPin scan of tenant users):
+       - api/users/create.ts (Vercel): reject if any tenant user matches
+       - api/users/[id].ts (Vercel): reject on PIN change, excluding self
+       - apiPlugin.ts users/create + put/users/:id (dev parity)
+       - api/[...path].ts users/create + users/:id (parity copy)
+       -> 400 "This PIN is already in use by another user in this tenant"
+[x] 0d.2 PIN length stays 4-8 digits everywhere (no change; keeps existing
+       PINs working). Super-admin (super_users) PINs unchanged.
+
+================================================================================
 PHASE 0 — Production API outage fix (Vercel serverless)
 ================================================================================
 
