@@ -13,7 +13,7 @@ import {
   recordPosAttempt,
   requestIp,
   type Identity,
-} from '../src/server/apiAuth';
+} from '../src/server/apiAuth.ts';
 
 function getSupabaseAdmin(schema?: string) {
   const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
