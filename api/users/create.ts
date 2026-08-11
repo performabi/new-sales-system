@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { hashPin, resolveIdentity, identityHasSchema } from '../../src/server/apiAuth.ts';
+import { hashPin, resolveIdentity, identityHasSchema } from '../../src/server/apiAuth.js';
 
 const supabaseUrl = process.env.VITE_SUPABASE_URL || '';
 const serviceRole = process.env.SERVICE_ROLE || '';

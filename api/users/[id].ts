@@ -1,6 +1,6 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import { hashPin, resolveIdentity, identityHasSchema, defaultSchemaFor } from '../../src/server/apiAuth.ts';
+import { hashPin, resolveIdentity, identityHasSchema, defaultSchemaFor } from '../../src/server/apiAuth.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { id } = req.query as { id: string };

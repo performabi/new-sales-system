@@ -5,6 +5,34 @@
 Status legend: [ ] = not started   [~] = in progress   [x] = done   [!] = blocked
 
 ================================================================================
+PHASE 0 — Production API outage fix (Vercel serverless)
+================================================================================
+
+[x] 0.1 Diagnosis (2026-08-11, evidence from Vercel runtime logs)
+       - Symptom: app loads (SPA 200) but ALL /api/* -> 500
+         FUNCTION_INVOCATION_FAILED; logbook blank, suppliers/PLU fail
+       - Runtime error: ERR_MODULE_NOT_FOUND: Cannot find module
+         '/var/task/src/server/apiAuth[.ts|]' imported from
+         /var/task/api/[...path].js
+       - Vercel compiles each function to .js but does NOT rewrite local
+         relative import specifiers and does not bundle files outside api/
+         (verified from .vercel/output local build layout: only the
+         function .js + node_modules, no src/server)
+       - BOTH import styles failed in prod: '.ts' (b0d12b9) and
+         extensionless (2h-old deploy) -> /api never worked in production;
+         user had only exercised the vite-plugin (dev) API path
+       - Canonical fix: explicit '.js' specifiers (file is emitted as
+         apiAuth.js) + includeFiles fallback in vercel.json if needed
+
+[x] 0.2 Fix: api/[...path].ts, api/users/[id].ts, api/users/create.ts
+       - Change '../src/server/apiAuth' / '../../src/server/apiAuth' ->
+         '../src/server/apiAuth.js' / '../../src/server/apiAuth.js'
+       - apiPlugin.ts (vite-only) intentionally untouched
+[x] 0.3 Local validation: npx tsc -b + npm run build + dev-server smoke
+[x] 0.4 Commit + push -> Vercel auto-deploy
+[ ] 0.5 Verify production (see PHASE 6)
+
+================================================================================
 PHASE 1 — Head-office sales review + dashboard + sidebar
 ================================================================================
 
@@ -77,7 +105,58 @@ PHASE 5 — Final verification
        - Share link button styling + copy toast
        - Reporting placeholder page
 [ ] 5.4 Confirm supabase/migrations/006_security_hardening.sql has been
-       run in Supabase SQL editor (reminder)
+        run in Supabase SQL editor (reminder)
+
+================================================================================
+PHASE 6 — Full system check (post-deploy verification)
+================================================================================
+
+[ ] 6.1 Deployment health
+      - vercel inspect: latest production deployment = Ready, contains
+        all 3 functions (api/[...path], api/users/[id], api/users/create)
+      - Confirm current production alias new-sales-system-rho.vercel.app
+        points at the latest deployment
+      - Note: new-sales-system.vercel.app is a STALE alias (SPA 200 but
+        /api 404) - do not use it for testing
+
+[ ] 6.2 Runtime error scan
+      - vercel logs <deploy>: NO ERR_MODULE_NOT_FOUND, NO 500s after smoke
+
+[ ] 6.3 Public-route probe matrix (curl, expect specific codes):
+      - GET  /api/stores?tenant_schema=<real tenant>  -> 200 JSON
+      - POST /api/pos/pin-login (empty body)          -> 400 (route alive)
+      - GET  /api/app/tenant-info                     -> 200/400 JSON
+      - GET  /api/public/tenants                      -> 200 JSON
+      - GET  /                                        -> 200 HTML
+      - GET  /app/<slug> deep link                    -> 200 HTML (SPA rewrite)
+      - GET  /pos/select-store                        -> 200 HTML (SPA rewrite)
+
+[ ] 6.4 Protected-route probe matrix (curl, no session -> expect 401 JSON,
+      proving the function executes; each must be 401, NOT 500):
+      - GET /api/logbook, /api/suppliers, /api/plu, /api/sales,
+        /api/plu_scheduled_changes/due,
+        /api/settings/loyalty-cashback-percent, /api/users/create (GET),
+        /api/admin/tenants, /api/admin/stores
+
+[ ] 6.5 Deep authenticated checks (optional - needs a PIN or magic-link
+      session generated with SERVICE_ROLE):
+      - POS PIN login (standard user) -> pos token -> /api/stores 200
+      - Admin PIN -> store select -> dashboard data loads
+      - PLU edit round-trip on a test PLU -> logbook entry created
+
+[ ] 6.6 Interactive user checklist (user, in browser):
+      - HO login -> Dashboard + Sales Review load data
+      - Logbook page populated (not blank)
+      - Suppliers list + add/edit a supplier
+      - PLU list + edit price -> save -> verify logbook entry
+      - POS: PIN login (standard + admin), store selection, make a test sale
+      - Loyalty cards page loads
+
+[ ] 6.7 Local dev regression: npm run dev -> stores 200, logbook page loads
+      (vite plugin path unaffected by .js change)
+
+[ ] 6.8 Mark 5.3/5.4 [x] once 6.6 passes; record results in plan
+
 
 ================================================================================
 NOTES / DECISIONS (locked in 2026-08-11)

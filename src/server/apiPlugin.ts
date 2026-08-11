@@ -15,7 +15,7 @@ import {
   recordPosAttempt,
   requestIp,
   type AuthEnv,
-} from './apiAuth.ts';
+} from './apiAuth';
 
 let currentSchema: string | undefined;
 
