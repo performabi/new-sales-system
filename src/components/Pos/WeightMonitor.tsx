@@ -12,20 +12,24 @@ export default function WeightMonitor({ weight, onWeightChange }: WeightMonitorP
 
   useEffect(() => {
     const scale = deviceManager.getScale();
-    if (scale && 'simulateWeight' in scale) {
-      setConnected(true);
-      const read = async () => {
-        const w = await scale.readWeight();
-        if (w !== null) {
-          setLiveWeight(w);
-          onWeightChange?.(w);
-        }
-      };
-      read();
-      const interval = setInterval(read, 1000);
-      return () => clearInterval(interval);
-    }
-  }, []);
+    let cancelled = false;
+    (async () => {
+      const ok = await scale.connect();
+      if (cancelled) return;
+      setConnected(ok);
+    })();
+    const read = async () => {
+      const w = await scale.readWeight();
+      if (cancelled) return;
+      if (w !== null) {
+        setLiveWeight(w);
+        onWeightChange?.(w);
+      }
+    };
+    read();
+    const interval = setInterval(read, 1000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [onWeightChange]);
 
   useEffect(() => {
     if (weight !== null) setLiveWeight(weight);

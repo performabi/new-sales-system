@@ -1075,7 +1075,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (req.query.store_id) query = query.eq('store_id', req.query.store_id);
       if (req.query.date) {
         query = query.gte('created_at', `${req.query.date}T00:00:00Z`).lte('created_at', `${req.query.date}T23:59:59Z`);
+      } else if (req.query.start_date || req.query.end_date) {
+        if (req.query.start_date) query = query.gte('created_at', `${req.query.start_date}T00:00:00Z`);
+        if (req.query.end_date) query = query.lte('created_at', `${req.query.end_date}T23:59:59Z`);
       }
+      if (req.query.payment_method) query = query.eq('payment_method', req.query.payment_method);
       const { data, error } = await query;
       if (error) return res.status(400).json({ error: error.message });
       return res.json(data);

@@ -79,24 +79,24 @@ export default function BasketPanel({ onFinalise, onAddLoyalty, onNewTab, showPi
                 {item.name}
               </div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                {currencySymbol}{item.unit_price.toFixed(2)} × {item.quantity}
+                {currencySymbol}{item.unit_price.toFixed(2)} × {item.uses_scale ? `${item.quantity.toFixed(3)} kg` : item.quantity}
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
               <button
                 className="btn btn-ghost"
                 style={{ padding: '2px 8px', fontSize: '0.8rem' }}
-                onClick={() => updateBasketItemQty(item.plu_id, item.quantity - 1)}
+                onClick={() => updateBasketItemQty(item.plu_id, item.quantity - (item.uses_scale ? 0.001 : 1))}
               >
                 −
               </button>
-              <span style={{ minWidth: '24px', textAlign: 'center', fontFamily: 'monospace' }}>
-                {item.quantity}
+              <span style={{ minWidth: item.uses_scale ? '52px' : '24px', textAlign: 'center', fontFamily: 'monospace' }}>
+                {item.uses_scale ? item.quantity.toFixed(3) : item.quantity}
               </span>
               <button
                 className="btn btn-ghost"
                 style={{ padding: '2px 8px', fontSize: '0.8rem' }}
-                onClick={() => updateBasketItemQty(item.plu_id, item.quantity + 1)}
+                onClick={() => updateBasketItemQty(item.plu_id, item.quantity + (item.uses_scale ? 0.001 : 1))}
               >
                 +
               </button>

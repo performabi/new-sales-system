@@ -8,67 +8,67 @@ Status legend: [ ] = not started   [~] = in progress   [x] = done   [!] = blocke
 PHASE 1 — Head-office sales review + dashboard + sidebar
 ================================================================================
 
-[ ] 1.1 Backend: extend /api/sales GET (apiPlugin.ts + [...path].ts)
+[x] 1.1 Backend: extend /api/sales GET (apiPlugin.ts + [...path].ts)
        - Add start_date / end_date query filters (backwards-compatible)
        - Add optional payment_method filter
-[ ] 1.2 New src/pages/app/Sales.tsx (view-only):
+[x] 1.2 New src/pages/app/Sales.tsx (view-only):
        - Defaults: last 7 days, all stores, all payment methods
        - Filters: date range, store, payment method
        - Summary bar: count, total, discounts (formatCurrency)
        - Transaction table with expandable items (no void/edit)
-[ ] 1.3 AppRouter: add /app/:slug/sales route
-[ ] 1.4 Sidebar: new "Sales" section (icon , "Sales Review")
+[x] 1.3 AppRouter: add /app/:slug/sales route
+[x] 1.4 Sidebar: new "Sales" section (icon , "Sales Review")
        directly below Dashboard
-[ ] 1.5 Sidebar: new "Reporting" section (icon ) directly ABOVE Sales
-[ ] 1.6 Dashboard (src/pages/app/Dashboard.tsx):
+[x] 1.5 Sidebar: new "Reporting" section (icon ) directly ABOVE Sales
+[x] 1.6 Dashboard (src/pages/app/Dashboard.tsx):
        - Two stat cards: "Sales" (count) + "Total Sold (currency)"
        - Date-range filter above grid (Today / 7 days / 30 days / custom),
          default 7 days
-[ ] 1.7 Verify: tsc + build + dev smoke + commit
+[x] 1.7 Verify: tsc + build pass. Commit NOT done (awaiting user approval)
 
 ================================================================================
 PHASE 2 — Share-link styling + Reporting placeholder
 ================================================================================
 
-[ ] 2.1 index.css: new accent-outline button style (contrast against
+[x] 2.1 index.css: new accent-outline button style (contrast against
        page background)
-[ ] 2.2 LoyaltyCards.tsx: apply accent-outline to "Share Registration Link"
+[x] 2.2 LoyaltyCards.tsx: apply accent-outline to "Share Registration Link"
        button; replace alert() with addToast; show link in copyable chip
-[ ] 2.3 New src/pages/app/Reporting.tsx "coming soon" placeholder page
-[ ] 2.4 Wire Reporting placeholder page to sidebar item (route + nav)
-[ ] 2.5 Verify: tsc + build + dev smoke + commit
+[x] 2.3 New src/pages/app/Reporting.tsx "coming soon" placeholder page
+[x] 2.4 Wire Reporting placeholder page to sidebar item (route + nav)
+[x] 2.5 Verify: tsc + build pass. Commit NOT done (awaiting user approval)
 
 ================================================================================
 PHASE 3 — Terminal scale weight popup
 ================================================================================
 
-[ ] 3.1 New WeightModal component:
+[x] 3.1 New WeightModal component:
        - PLU name + price/kg display
        - Live scale weight when connected (connect + poll)
        - Manual kg entry (3 decimal places)
        - Confirm / Cancel
-[ ] 3.2 Till.tsx: every scale-PLU click / barcode scan opens the popup
+[x] 3.2 Till.tsx: every scale-PLU click / barcode scan opens the popup
        (always prompt); remove broken auto-weight path
-[ ] 3.3 appStore.ts: fix addToBasket to respect passed quantity
+[x] 3.3 appStore.ts: fix addToBasket to respect passed quantity
        (scale items accumulate kg on re-add, do not force quantity 1)
-[ ] 3.4 Verify: tsc + build + dev smoke + commit
+[x] 3.4 Verify: tsc + build pass. Commit NOT done (awaiting user approval)
 
 ================================================================================
 PHASE 4 — Receipt print overhaul
 ================================================================================
 
-[ ] 4.1 Till.tsx handlePrint: dedicated 80mm thermal print stylesheet
+[x] 4.1 Till.tsx handlePrint: dedicated 80mm thermal print stylesheet
        (monospace, store header, date + txn number, aligned item columns,
        discount line, bold TOTAL, payment line, footer)
-[ ] 4.2 ReceiptModal: match on-screen layout to print layout
-[ ] 4.3 Verify: tsc + build + dev smoke + commit
+[x] 4.2 ReceiptModal: match on-screen layout to print layout
+[x] 4.3 Verify: tsc + build pass. Commit NOT done (awaiting user approval)
 
 ================================================================================
 PHASE 5 — Final verification
 ================================================================================
 
-[ ] 5.1 npx tsc --noEmit (app + server + api strict checks)
-[ ] 5.2 npm run build
+[x] 5.1 npx tsc --noEmit (app + server + api strict checks)
+[x] 5.2 npm run build
 [ ] 5.3 Full dev smoke test:
        - POS login -> scale item -> weight popup -> sale
        - Receipt print preview

@@ -35,6 +35,8 @@ import CurrencyConfig from '../pages/app/CurrencyConfig';
 import CashbackConfig from '../pages/app/CashbackConfig';
 import LoyaltyCards from '../pages/app/LoyaltyCards';
 import LoyaltyNotifications from '../pages/app/LoyaltyNotifications';
+import Sales from '../pages/app/Sales';
+import Reporting from '../pages/app/Reporting';
 
 import PosDashboard from '../pages/pos/Dashboard';
 import PosStoreSelect from '../pages/pos/StoreSelect';
@@ -255,6 +257,8 @@ export default function AppRouter() {
         >
           <Route index element={<Navigate to="dashboard" replace />} />
           <Route path="dashboard" element={<Dashboard />} />
+          <Route path="sales" element={<Sales />} />
+          <Route path="reporting" element={<Reporting />} />
           <Route path="stores" element={<Stores />} />
           <Route path="plu" element={<Plu />} />
           <Route path="users" element={<Users />} />

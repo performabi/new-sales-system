@@ -1964,13 +1964,18 @@ export function apiPlugin(): Plugin {
           const supabaseAdmin = getSupabaseAdmin(server);
           const storeId = req.query.store_id as string;
           const date = req.query.date as string;
+          const startDate = req.query.start_date as string;
+          const endDate = req.query.end_date as string;
+          const paymentMethod = req.query.payment_method as string;
           let query = supabaseAdmin.from('sales_transactions').select('*, sale_items(*)').order('created_at', { ascending: false });
           if (storeId) query = query.eq('store_id', storeId);
           if (date) {
-            const start = `${date}T00:00:00Z`;
-            const end = `${date}T23:59:59Z`;
-            query = query.gte('created_at', start).lte('created_at', end);
+            query = query.gte('created_at', `${date}T00:00:00Z`).lte('created_at', `${date}T23:59:59Z`);
+          } else if (startDate || endDate) {
+            if (startDate) query = query.gte('created_at', `${startDate}T00:00:00Z`);
+            if (endDate) query = query.lte('created_at', `${endDate}T23:59:59Z`);
           }
+          if (paymentMethod) query = query.eq('payment_method', paymentMethod);
           const { data, error } = await query;
           if (error) return res.status(400).json({ error: error.message });
           return res.json(data);

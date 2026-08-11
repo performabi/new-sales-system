@@ -185,6 +185,16 @@
   font-size: 1.4rem;
 }
 
+/* Divider between Terminal and Dashboard */
+.sidebar-divider {
+  height: 1px;
+  margin: 2px 10px;
+  background: rgba(255, 255, 255, 0.09);
+}
+.theme-dark .sidebar-divider {
+  background: rgba(255, 255, 255, 0.05);
+}
+
 /* ---------- Section Header (clickable) ---------- */
 .sidebar-section-header {
   display: flex;
@@ -238,6 +248,17 @@
   border: 1px solid transparent;
 }
 
+/* Selected (expanded) header — contrast per theme:
+   light theme sidebar (#0a1929) → darker; dark theme (#070e1a) → lighter */
+.sidebar-section-header.expanded {
+  background: rgba(0, 0, 0, 0.24);
+  border-color: rgba(255, 255, 255, 0.05);
+}
+.theme-dark .sidebar-section-header.expanded {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.07);
+}
+
 .section-arrow {
   font-size: 0.55rem;
   color: rgba(255, 255, 255, 0.35);
@@ -262,6 +283,103 @@
 
 .sidebar-section-header.collapsed .sidebar-section-label {
   font-weight: 600;
+}
+
+/* ---------- Terminal button (above Dashboard, darker) ---------- */
+.terminal-btn {
+  background: rgba(0, 0, 0, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.terminal-btn:hover {
+  background: rgba(0, 0, 0, 0.5);
+}
+.terminal-btn.active {
+  background: var(--primary-light);
+  border-color: var(--primary);
+}
+
+/* ---------- Section items (tree view) ---------- */
+.sidebar-section-items {
+  position: relative;
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition:
+    grid-template-rows var(--transition-base),
+    opacity 0.25s ease,
+    transform var(--transition-base);
+}
+
+.sidebar-section-items.expanded {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.sidebar-section-items-inner {
+  overflow: hidden;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-left: 24px;
+}
+
+/* Vertical guide line dropping from the header */
+.sidebar-section-items::before {
+  content: '';
+  position: absolute;
+  left: 24px;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+/* Items: slightly smaller than headers, dash connected to the line */
+.sidebar-section-items .nav-item {
+  padding: 10px 14px;
+}
+
+.sidebar-section-items .nav-item::before {
+  content: '';
+  position: absolute;
+  left: 24px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 14px;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.sidebar-section-items .nav-item.active::before {
+  left: 24px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 60%;
+  border-radius: 0;
+  background: var(--primary);
+}
+
+.sidebar-section-items .nav-icon {
+  font-size: 0.95rem;
+}
+
+.sidebar-section-items .nav-label {
+  font-size: 0.8rem;
+}
+
+/* Collapsed: items become icon-only, hide tree connectors */
+.sidebar.collapsed .sidebar-section-items-inner {
+  padding-left: 0;
+  overflow: visible;
+}
+
+.sidebar.collapsed .sidebar-section-items::before,
+.sidebar.collapsed .sidebar-section-items .nav-item::before {
+  display: none;
 }
 
 /* ---------- Footer ---------- */

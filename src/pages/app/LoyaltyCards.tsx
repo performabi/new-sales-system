@@ -7,7 +7,7 @@ export default function LoyaltyCards() {
   const {
     loyaltyCards, loyaltyCardsLoading, fetchLoyaltyCards,
     createLoyaltyCard, updateLoyaltyCard, stores, fetchStores,
-    currencyConfig, fetchCurrencyConfig,
+    currencyConfig, fetchCurrencyConfig, addToast,
   } = useAppStore();
 
   const [showModal, setShowModal] = useState(false);
@@ -20,6 +20,7 @@ export default function LoyaltyCards() {
   const [preferredStoreId, setPreferredStoreId] = useState('');
   const [search, setSearch] = useState('');
   const [qrData, setQrData] = useState<string | null>(null);
+  const [shareLinkCopied, setShareLinkCopied] = useState(false);
 
   useEffect(() => {
     fetchLoyaltyCards();
@@ -84,11 +85,21 @@ export default function LoyaltyCards() {
 
   const storeMap = new Map(stores.map((s) => [s.store_id, s.name]));
 
-  const shareLink = () => {
+  const registrationLink = (() => {
     const match = window.location.pathname.match(/^\/app\/([^/]+)/);
-    const base = match ? `${window.location.origin}/loyalty/${match[1]}/register` : `${window.location.origin}/loyalty/register`;
-    navigator.clipboard.writeText(base);
-    alert('Registration link copied!');
+    return match ? `${window.location.origin}/loyalty/${match[1]}/register` : `${window.location.origin}/loyalty/register`;
+  })();
+
+  const shareLink = async () => {
+    try {
+      await navigator.clipboard.writeText(registrationLink);
+      setShareLinkCopied(true);
+      addToast('success', 'Registration link copied!');
+      setTimeout(() => setShareLinkCopied(false), 3000);
+    } catch (err) {
+      console.error('copy failed:', err);
+      addToast('error', 'Could not copy link');
+    }
   };
 
   const columns = [
@@ -127,9 +138,14 @@ export default function LoyaltyCards() {
         <div style={{ display: 'flex', gap: '10px', marginTop: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
           <input className="form-input" style={{ maxWidth: '300px' }} placeholder="Search by name or card number…" value={search} onChange={(e) => setSearch(e.target.value)} />
           <button className="btn btn-primary" onClick={openCreate}>+ New Card</button>
-          <button className="btn btn-ghost" onClick={shareLink}>
+          <button className="btn btn-accent-outline" onClick={shareLink}>
             🔗 Share Registration Link
           </button>
+          {shareLinkCopied && (
+            <span className="copy-chip" onClick={shareLink} title="Click to copy again">
+              {registrationLink}
+            </span>
+          )}
         </div>
       </div>
 

@@ -21,19 +21,26 @@ interface Section {
 
 const SECTIONS: Section[] = [
   {
+    name: 'Reporting',
+    icon: '📊',
+    items: [
+      { path: '/app/reporting', icon: '📈', label: 'Reports' },
+    ],
+  },
+  {
+    name: 'Sales',
+    icon: '🧾',
+    items: [
+      { path: '/app/sales', icon: '🧾', label: 'Sales Review' },
+    ],
+  },
+  {
     name: 'Operations',
     icon: '🏭',
     items: [
       { path: '/app/plu',                     icon: '🏷️', label: 'PLU' },
       { path: '/app/inventory/purchase-orders', icon: '📝', label: 'Purchase Orders' },
       { path: '/app/inventory',               icon: '📦',  label: 'Inventory' },
-    ],
-  },
-  {
-    name: 'Terminal',
-    icon: '🖥️',
-    items: [
-      { path: '/pos/dashboard', icon: '🏪', label: 'Store Terminal' },
     ],
   },
   {
@@ -123,7 +130,12 @@ export default function Sidebar() {
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>(() => ({}));
 
   const toggleSection = useCallback((name: string) => {
-    setExpandedSections((prev) => ({ ...prev, [name]: !prev[name] }));
+    setExpandedSections((prev) => {
+      const next: Record<string, boolean> = {};
+      for (const key of Object.keys(prev)) next[key] = false;
+      next[name] = !prev[name];
+      return next;
+    });
   }, []);
 
   const handleLogout = async () => {
@@ -177,6 +189,18 @@ export default function Sidebar() {
       </div>
 
       <nav className="sidebar-nav">
+        {/* Terminal — above Dashboard, darker button */}
+        <button
+          className={`nav-item terminal-btn ${isActive('/pos/dashboard') ? 'active' : ''}`}
+          onClick={() => navigate('/pos/dashboard')}
+          title={sidebarCollapsed ? 'Terminal' : undefined}
+        >
+          <span className="nav-icon">🖥️</span>
+          {!sidebarCollapsed && <span className="nav-label">Terminal</span>}
+        </button>
+
+        <div className="sidebar-divider" />
+
         {/* Dashboard — always visible, no section */}
         <button
           className={`nav-item ${isActive(prefixPath('/app/dashboard')) ? 'active' : ''}`}
@@ -197,17 +221,21 @@ export default function Sidebar() {
                 collapsed={sidebarCollapsed}
                 onToggle={() => toggleSection(section.name)}
               />
-             {(expandedSections[section.name] ?? false) && section.items.map((item) => (
-              <button
-                key={item.path}
-                className={`nav-item ${isActive(prefixPath(item.path)) ? 'active' : ''}`}
-                onClick={() => handleNavClick(item)}
-                title={sidebarCollapsed ? item.label : undefined}
-              >
-                <span className="nav-icon">{item.icon}</span>
-                {!sidebarCollapsed && <span className="nav-label">{item.label}</span>}
-              </button>
-            ))}
+             <div className={`sidebar-section-items ${expandedSections[section.name] ? 'expanded' : ''}`}>
+              <div className="sidebar-section-items-inner">
+                {section.items.map((item) => (
+                  <button
+                    key={item.path}
+                    className={`nav-item ${isActive(prefixPath(item.path)) ? 'active' : ''}`}
+                    onClick={() => handleNavClick(item)}
+                    title={sidebarCollapsed ? item.label : undefined}
+                  >
+                    <span className="nav-icon">{item.icon}</span>
+                    {!sidebarCollapsed && <span className="nav-label">{item.label}</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>
         ))}
       </nav>

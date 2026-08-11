@@ -6,6 +6,7 @@ export class ScaleSimulator implements IScale {
   private timer?: ReturnType<typeof setInterval>;
 
   async connect(): Promise<boolean> {
+    if (this.connected) return true;
     this.connected = true;
     this.handlers?.onConnect();
     this.timer = setInterval(() => {

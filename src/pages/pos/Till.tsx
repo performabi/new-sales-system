@@ -9,6 +9,7 @@ import ScanInput from '../../components/Pos/ScanInput';
 import WeightMonitor from '../../components/Pos/WeightMonitor';
 import BasketPanel from '../../components/Pos/BasketPanel';
 import PaymentModal from '../../components/Pos/PaymentModal';
+import WeightModal from '../../components/Pos/WeightModal';
 import ReceiptModal from '../../components/Pos/ReceiptModal';
 import TillNotificationBar from '../../components/Pos/TillNotificationBar';
 import type { Plu } from '../../types';
@@ -55,7 +56,7 @@ export default function Till() {
   const [pinTitle, setPinTitle] = useState('');
   const [pinCallback, setPinCallback] = useState<((user: any) => void) | null>(null);
   const [currencyConfig, setCurrencyConfig] = useState<any>(null);
-  const [scaleWeight, setScaleWeight] = useState<number | null>(null);
+  const [weightPlu, setWeightPlu] = useState<Plu | null>(null);
 
   useEffect(() => {
     if (storeId) {
@@ -66,15 +67,7 @@ export default function Till() {
       .then((r) => r.json())
       .then((c) => setCurrencyConfig(c))
       .catch(() => {});
-    const scale = deviceManager.getScale();
-    if (!scale) return;
-    const read = async () => {
-      const w = await scale.readWeight();
-      if (w !== null) setScaleWeight(w);
-    };
-    read();
-    const interval = setInterval(read, 2000);
-    return () => clearInterval(interval);
+    deviceManager.getScale().connect().catch(() => {});
   }, [storeId]);
 
   const getEffectivePrice = useCallback((plu: Plu): number => {
@@ -110,19 +103,34 @@ export default function Till() {
 
   const addBasketItem = (plu: Plu) => {
     const price = getEffectivePrice(plu);
+    if (plu.uses_scale) {
+      setWeightPlu(plu);
+      return;
+    }
     addToBasket({
       plu_id: plu.plu_id,
       name: plu.name,
       plu_number: plu.plu_number,
       unit_price: price,
       total_price: price,
-      uses_scale: plu.uses_scale,
-      quantity: plu.uses_scale ? 0 : 1,
+      uses_scale: false,
+      quantity: 1,
     });
-    if (plu.uses_scale && scaleWeight !== null) {
-      // On scale items, immediately set weight
-      useAppStore.getState().updateBasketItemQty(plu.plu_id, scaleWeight);
-    }
+  };
+
+  const handleWeightConfirm = (kg: number) => {
+    if (!weightPlu) return;
+    const price = getEffectivePrice(weightPlu);
+    addToBasket({
+      plu_id: weightPlu.plu_id,
+      name: weightPlu.name,
+      plu_number: weightPlu.plu_number,
+      unit_price: price,
+      total_price: price * kg,
+      uses_scale: true,
+      quantity: kg,
+    });
+    setWeightPlu(null);
   };
 
   const handleBarcodeLookup = async (barcode: string): Promise<Plu | null> => {
@@ -190,8 +198,15 @@ export default function Till() {
     if (!printWin) return;
     printWin.document.write(`
       <html><head><title>Receipt</title>
-      <style>body{font-family:monospace;font-size:12px;width:80mm;margin:0;padding:8px}
-      @media print{@page{margin:0}}hr{border:none;border-top:1px dashed #999}
+      <style>
+        @page { size: 80mm auto; margin: 0; }
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+          width: 80mm; margin: 0 auto; padding: 3mm 4mm;
+          font-family: 'Courier New', Courier, monospace;
+          font-size: 11px; color: #000; background: #fff;
+        }
+        #receipt-content { width: 72mm; }
       </style></head><body>
       ${receiptEl.innerHTML}
       <script>window.onload=function(){window.print();window.close()}</scr'+'ipt>
@@ -288,7 +303,7 @@ export default function Till() {
               <span style={{ fontSize: '0.85rem', fontWeight: 600, fontFamily: 'monospace' }}>
                 {now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
               </span>
-              <WeightMonitor weight={scaleWeight} />
+              <WeightMonitor weight={null} />
             </div>
           </div>
           <PluGrid items={filteredPlu} storeId={storeId} onSelect={handlePluSelect} getEffectivePrice={getEffectivePrice} />
@@ -340,6 +355,15 @@ export default function Till() {
         onPay={handlePay}
         total={paymentTotal}
         currencySymbol={symbol}
+      />
+
+      <WeightModal
+        isOpen={!!weightPlu}
+        plu={weightPlu}
+        pricePerKg={weightPlu ? getEffectivePrice(weightPlu) : 0}
+        currencySymbol={symbol}
+        onConfirm={handleWeightConfirm}
+        onCancel={() => setWeightPlu(null)}
       />
 
       <ReceiptModal

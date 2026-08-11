@@ -288,6 +288,20 @@ a:hover { color: var(--primary-hover); }
   transform: translateY(-1px);
 }
 
+.btn-accent-outline {
+  background: transparent;
+  color: var(--accent);
+  border: 2px solid var(--accent);
+  box-shadow: 0 0 12px rgba(103, 255, 166, 0.15), inset 0 0 8px rgba(103, 255, 166, 0.08);
+}
+.btn-accent-outline:hover {
+  background: var(--accent);
+  color: #06141b;
+  border-color: var(--accent);
+  box-shadow: 0 4px 18px rgba(103, 255, 166, 0.40);
+  transform: translateY(-1px);
+}
+
 .btn-sm {
   padding: 6px 14px;
   font-size: 0.8rem;
@@ -435,6 +449,28 @@ a:hover { color: var(--primary-hover); }
 .badge-secondary { background: var(--secondary-light); color: var(--secondary); }
 .badge-info      { background: var(--info-light);      color: var(--info); }
 .badge-warning   { background: var(--warning-light);   color: var(--warning); }
+
+.copy-chip {
+  display: inline-flex;
+  align-items: center;
+  max-width: 360px;
+  padding: 8px 14px;
+  border: 1px dashed var(--primary);
+  border-radius: var(--radius-md);
+  background: var(--primary-light);
+  color: var(--primary);
+  font-family: var(--font-mono, monospace);
+  font-size: 0.78rem;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.copy-chip:hover {
+  border-style: solid;
+  box-shadow: 0 0 10px rgba(8, 143, 143, 0.25);
+}
+
 
 /* ================================================================
    MODAL — glassmorphism

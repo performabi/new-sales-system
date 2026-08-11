@@ -13,47 +13,65 @@ export default function ReceiptModal({ isOpen, onClose, onPrint, transaction, cu
   if (!transaction) return null;
 
   const items = transaction.sale_items || [];
+  const created = new Date(transaction.created_at);
 
   return (
     <Modal isOpen={isOpen} onClose={onClose} title="Sale Complete">
       <div style={{ minWidth: '300px' }}>
         <div id="receipt-content" style={{
-          fontFamily: 'monospace', fontSize: '0.8rem', padding: '16px',
-          background: '#fff', color: '#000', borderRadius: '4px', maxWidth: '300px', margin: '0 auto',
+          width: '72mm', margin: '0 auto', padding: '6mm 4mm',
+          background: '#fff', color: '#000', borderRadius: '4px',
+          fontFamily: "'Courier New', Courier, monospace", fontSize: '11px', lineHeight: 1.4,
         }}>
-          <div style={{ textAlign: 'center', marginBottom: '12px' }}>
-            <div style={{ fontWeight: 700, fontSize: '1rem' }}>{storeName}</div>
-            <div style={{ fontSize: '0.7rem', opacity: 0.7 }}>
-              {new Date(transaction.created_at).toLocaleString()}
+          <div style={{ textAlign: 'center', marginBottom: '6px' }}>
+            <div style={{ fontWeight: 700, fontSize: '13px' }}>{storeName}</div>
+            <div style={{ fontSize: '10px' }}>
+              TXN {String(transaction.transaction_id || '').slice(0, 8).toUpperCase()}
+            </div>
+            <div style={{ fontSize: '10px' }}>
+              {created.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}{' '}
+              {created.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })}
             </div>
           </div>
-          <hr style={{ border: 'none', borderTop: '1px dashed #999' }} />
-          <div style={{ margin: '8px 0' }}>
-            {items.map((item: any, i: number) => (
-              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                <span>{item.plu_name} ×{item.quantity}</span>
-                <span>{currencySymbol}{(item.total_price || item.unit_price * item.quantity).toFixed(2)}</span>
-              </div>
-            ))}
+
+          <div style={{ borderTop: '1px dashed #999', margin: '6px 0' }} />
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '10px', marginBottom: '4px' }}>
+            <span>ITEM</span>
+            <span>AMOUNT</span>
           </div>
-          <hr style={{ border: 'none', borderTop: '1px dashed #999' }} />
-          {transaction.discount_amount > 0 && (
+          {items.map((item: any, i: number) => {
+            const amount = (item.total_price || item.unit_price * item.quantity).toFixed(2);
+            const name = `${item.plu_name} ×${item.quantity}`;
+            return (
+              <div key={i} style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '2px', whiteSpace: 'nowrap' }}>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '44mm' }}>{name}</span>
+                <span>{currencySymbol}{amount}</span>
+              </div>
+            );
+          })}
+
+          <div style={{ borderTop: '1px dashed #999', margin: '6px 0' }} />
+
+          {Number(transaction.discount_amount) > 0 && (
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <span>Discount</span>
               <span>-{currencySymbol}{Number(transaction.discount_amount).toFixed(2)}</span>
             </div>
           )}
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: '0.9rem', marginTop: '4px' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: '13px', marginTop: '4px' }}>
             <span>TOTAL</span>
             <span>{currencySymbol}{Number(transaction.total_amount).toFixed(2)}</span>
           </div>
-          <div style={{ textAlign: 'center', marginTop: '8px', fontSize: '0.65rem', opacity: 0.6 }}>
-            {transaction.payment_method?.toUpperCase()} — {transaction.payment_note || ''}
+
+          <div style={{ textAlign: 'center', marginTop: '6px', fontSize: '10px' }}>
+            PAID BY {String(transaction.payment_method || '').toUpperCase()}
+            {transaction.payment_note ? ` — ${transaction.payment_note}` : ''}
           </div>
-          <hr style={{ border: 'none', borderTop: '1px dashed #999' }} />
-          <div style={{ textAlign: 'center', marginTop: '8px', fontSize: '0.65rem', opacity: 0.7 }}>
-            Thank you for your custom!
-          </div>
+
+          <div style={{ borderTop: '1px dashed #999', margin: '6px 0' }} />
+
+          <div style={{ textAlign: 'center', fontSize: '10px' }}>Thank you for your custom!</div>
         </div>
 
         <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>

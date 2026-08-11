@@ -1669,11 +1669,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   addToBasket: (item) => set((state) => {
     const tab = state.basketTabs.find((t) => t.tabId === state.activeTabId);
     if (!tab) return state;
+    const qty = item.quantity ?? 1;
     const existing = tab.items.find((i: any) => i.plu_id === item.plu_id);
     if (existing) {
-      existing.quantity += 1;
+      existing.quantity += qty;
     } else {
-      tab.items.push({ ...item, quantity: 1 });
+      tab.items.push({ ...item, quantity: qty });
     }
     return { basketTabs: [...state.basketTabs] };
   }),
