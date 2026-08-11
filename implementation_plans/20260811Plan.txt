@@ -28,6 +28,10 @@ PHASE 0 — Production API outage fix (Vercel serverless)
        - Change '../src/server/apiAuth' / '../../src/server/apiAuth' ->
          '../src/server/apiAuth.js' / '../../src/server/apiAuth.js'
        - apiPlugin.ts (vite-only) intentionally untouched
+[x] 0.2b Route-parity gap: POST /api/pos/pin-login (PIN-first terminal,
+       8baa454) existed only in the dev plugin -> 404 on Vercel.
+       Ported the full route (admin super-user path + tenant user scan)
+       into api/[...path].ts; first-segment route families now match 19/19
 [x] 0.3 Local validation: npx tsc -b + npm run build + dev-server smoke
 [x] 0.4 Commit + push -> Vercel auto-deploy
 [ ] 0.5 Verify production (see PHASE 6)
