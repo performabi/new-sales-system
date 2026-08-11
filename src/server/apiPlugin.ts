@@ -113,9 +113,12 @@ export function apiPlugin(): Plugin {
           if (path.startsWith('admin/')) {
             const posListing =
               identity.kind === 'pos' &&
-              identity.payload.role === 'super_admin' &&
               method === 'GET' &&
-              (path === 'admin/tenants' || path === 'admin/stores');
+              ((identity.payload.role === 'super_admin' &&
+                (path === 'admin/tenants' || path === 'admin/stores')) ||
+                (identity.payload.role === 'admin' &&
+                  identity.payload.store_id === 'pending' &&
+                  path === 'admin/stores'));
             if (identity.kind !== 'jwt' && !posListing) {
               return res.status(403).json({ error: 'Super admin session required' });
             }
@@ -1060,6 +1063,17 @@ export function apiPlugin(): Plugin {
           }
 
           await recordPosAttempt(authEnv, identifier, true, requestIp(req));
+          const userPayload = {
+            user_id: user.user_id,
+            username: user.username,
+            full_name: user.full_name,
+            role: user.role,
+            assigned_store_id: user.assigned_store_id,
+            assigned_store_name: (user.stores as any)?.name || null,
+          };
+          if (req.body?.verify_only) {
+            return res.json({ user: userPayload });
+          }
           const posToken = signPosToken(authEnv, {
             uid: user.user_id,
             schema: tenantSchema,
@@ -1068,14 +1082,7 @@ export function apiPlugin(): Plugin {
           });
 
           return res.json({
-            user: {
-              user_id: user.user_id,
-              username: user.username,
-              full_name: user.full_name,
-              role: user.role,
-              assigned_store_id: user.assigned_store_id,
-              assigned_store_name: (user.stores as any)?.name || null,
-            },
+            user: userPayload,
             pos_token: posToken,
             expires_in: 43200,
           });
@@ -1150,6 +1157,22 @@ export function apiPlugin(): Plugin {
             if (authUser?.user && !authUser.user.confirmed_at) {
               await recordPosAttempt(authEnv, identifier, false, requestIp(req));
               return res.status(401).json({ error: 'Please verify your email before using the terminal' });
+            }
+
+            if (user.role === 'admin') {
+              await recordPosAttempt(authEnv, identifier, true, requestIp(req));
+              const pendingToken = signPosToken(authEnv, {
+                uid: user.user_id,
+                schema,
+                store_id: 'pending',
+                role: 'admin',
+              });
+              return res.json({
+                kind: 'admin',
+                tenant_schema: schema,
+                pending_token: pendingToken,
+                user: { user_id: user.user_id, full_name: user.full_name, role: 'admin' },
+              });
             }
 
             if (!user.assigned_store_id) {
@@ -1285,8 +1308,11 @@ export function apiPlugin(): Plugin {
             return res.status(400).json({ error: 'tenant_schema and store_id required' });
           }
           const identity = (req as any).identity;
-          if (!identity || identity.kind !== 'pos' || identity.payload.role !== 'super_admin' || identity.payload.store_id !== 'pending') {
+          if (!identity || identity.kind !== 'pos' || (identity.payload.role !== 'super_admin' && identity.payload.role !== 'admin') || identity.payload.store_id !== 'pending') {
             return res.status(403).json({ error: 'Verify your PIN first' });
+          }
+          if (identity.payload.role === 'admin' && identity.payload.schema !== tenant_schema) {
+            return res.status(403).json({ error: 'Not a member of this tenant' });
           }
           const tenantAdmin = getSupabaseAdmin(server, tenant_schema);
           const { data: store } = await tenantAdmin.from('stores').select('store_id, name').eq('store_id', store_id).maybeSingle();
@@ -1296,13 +1322,13 @@ export function apiPlugin(): Plugin {
             uid: identity.payload.uid,
             schema: tenant_schema,
             store_id,
-            role: 'super_admin',
+            role: identity.payload.role,
           });
           return res.json({
             user: {
               user_id: identity.payload.uid,
               full_name: (req as any).identity?.payload?.full_name || null,
-              role: 'super_admin',
+              role: identity.payload.role,
               assigned_store_id: store_id,
               assigned_store_name: store_name || store.name,
             },
@@ -1512,16 +1538,37 @@ export function apiPlugin(): Plugin {
         }
       });
 
-      // ---- POS: Clock In (identity-bound — cannot clock in as another user) ----
+      // ---- POS: Clock In (PIN-verified staff allocation) ----
       app.post('/api/pos/clock-in', async (req, res) => {
         try {
-          const { store_id, user_id } = req.body;
-          if (!store_id || !user_id) return res.status(400).json({ error: 'store_id and user_id required' });
+          const { store_id, user_id, pin } = req.body;
+          let effectiveUserId = user_id;
+          if (!store_id && !pin) return res.status(400).json({ error: 'store_id and user_id required' });
+          if (pin) {
+            if (!/^\d{4,8}$/.test(String(pin))) {
+              return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+            }
+            const tenantSchemaForPin = (req as any).tenantSchema || '';
+            const pinIdentifier = `clock:${tenantSchemaForPin}:${String(pin).length}`;
+            if (await isPosLoginThrottled(authEnv, pinIdentifier)) {
+              return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+            }
+            const supabaseAdmin = getSupabaseAdmin(server);
+            const { data: tenantUsers } = await supabaseAdmin.from('users').select('user_id, pin_hash').eq('is_active', true);
+            const staffByPin = (tenantUsers || []).find((u: any) => verifyPin(String(pin), u.pin_hash).ok);
+            if (!staffByPin) {
+              await recordPosAttempt(authEnv, pinIdentifier, false, requestIp(req));
+              return res.status(401).json({ error: 'Invalid PIN' });
+            }
+            await recordPosAttempt(authEnv, pinIdentifier, true, requestIp(req));
+            effectiveUserId = staffByPin.user_id;
+          }
+          if (!store_id || !effectiveUserId) return res.status(400).json({ error: 'store_id and user_id required' });
           const identity = (req as any).identity;
-          if (identity?.kind === 'pos' && identity.payload.uid !== user_id) {
+          if (!pin && identity?.kind === 'pos' && identity.payload.uid !== effectiveUserId) {
             return res.status(403).json({ error: 'Cannot clock in as another user' });
           }
-          if (identity?.kind === 'jwt' && identity.user.id !== user_id) {
+          if (!pin && identity?.kind === 'jwt' && identity.user.id !== effectiveUserId) {
             return res.status(403).json({ error: 'Cannot clock in as another user' });
           }
           const supabaseAdmin = getSupabaseAdmin(server);
@@ -1529,7 +1576,7 @@ export function apiPlugin(): Plugin {
           if (!store) return res.status(400).json({ error: 'Store not found in this tenant' });
           const { data, error } = await supabaseAdmin
             .from('staff_timesheets')
-            .insert({ store_id, user_id, clock_in: new Date().toISOString() })
+            .insert({ store_id, user_id: effectiveUserId, clock_in: new Date().toISOString() })
             .select()
             .single();
           if (error) return res.status(400).json({ error: error.message });
@@ -1540,23 +1587,43 @@ export function apiPlugin(): Plugin {
         }
       });
 
-      // ---- POS: Clock Out (identity-bound) ----
+      // ---- POS: Clock Out (PIN-verified staff allocation) ----
       app.put('/api/pos/clock-out', async (req, res) => {
         try {
-          const { user_id } = req.body;
-          if (!user_id) return res.status(400).json({ error: 'user_id required' });
+          const { user_id, pin } = req.body;
+          let effectiveUserId = user_id;
+          if (pin) {
+            if (!/^\d{4,8}$/.test(String(pin))) {
+              return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+            }
+            const tenantSchemaForPin = (req as any).tenantSchema || '';
+            const pinIdentifier = `clock:${tenantSchemaForPin}:${String(pin).length}`;
+            if (await isPosLoginThrottled(authEnv, pinIdentifier)) {
+              return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+            }
+            const supabaseAdmin = getSupabaseAdmin(server);
+            const { data: tenantUsers } = await supabaseAdmin.from('users').select('user_id, pin_hash').eq('is_active', true);
+            const staffByPin = (tenantUsers || []).find((u: any) => verifyPin(String(pin), u.pin_hash).ok);
+            if (!staffByPin) {
+              await recordPosAttempt(authEnv, pinIdentifier, false, requestIp(req));
+              return res.status(401).json({ error: 'Invalid PIN' });
+            }
+            await recordPosAttempt(authEnv, pinIdentifier, true, requestIp(req));
+            effectiveUserId = staffByPin.user_id;
+          }
+          if (!effectiveUserId) return res.status(400).json({ error: 'user_id required' });
           const identity = (req as any).identity;
-          if (identity?.kind === 'pos' && identity.payload.uid !== user_id) {
+          if (!pin && identity?.kind === 'pos' && identity.payload.uid !== effectiveUserId) {
             return res.status(403).json({ error: 'Cannot clock out another user' });
           }
-          if (identity?.kind === 'jwt' && identity.user.id !== user_id) {
+          if (!pin && identity?.kind === 'jwt' && identity.user.id !== effectiveUserId) {
             return res.status(403).json({ error: 'Cannot clock out another user' });
           }
           const supabaseAdmin = getSupabaseAdmin(server);
           const { data: open } = await supabaseAdmin
             .from('staff_timesheets')
             .select('*')
-            .eq('user_id', user_id)
+            .eq('user_id', effectiveUserId)
             .is('clock_out', null)
             .order('clock_in', { ascending: false })
             .limit(1)
@@ -1576,16 +1643,36 @@ export function apiPlugin(): Plugin {
         }
       });
 
-      // ---- POS: Clock Status (identity-bound) ----
+      // ---- POS: Clock Status (PIN-verified view; PIN optional when viewing own timesheet) ----
       app.get('/api/pos/clock-status', async (req, res) => {
         try {
-          const { user_id } = req.query;
+          let user_id = req.query.user_id as string;
+          const pin = (req.query.pin as string) || null;
+          if (pin) {
+            if (!/^\d{4,8}$/.test(pin)) {
+              return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+            }
+            const tenantSchemaForPin = (req as any).tenantSchema || '';
+            const pinIdentifier = `clock:${tenantSchemaForPin}:${pin.length}`;
+            if (await isPosLoginThrottled(authEnv, pinIdentifier)) {
+              return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+            }
+            const supabaseAdmin = getSupabaseAdmin(server);
+            const { data: tenantUsers } = await supabaseAdmin.from('users').select('user_id, pin_hash').eq('is_active', true);
+            const staffByPin = (tenantUsers || []).find((u: any) => verifyPin(pin, u.pin_hash).ok);
+            if (!staffByPin) {
+              await recordPosAttempt(authEnv, pinIdentifier, false, requestIp(req));
+              return res.status(401).json({ error: 'Invalid PIN' });
+            }
+            await recordPosAttempt(authEnv, pinIdentifier, true, requestIp(req));
+            user_id = staffByPin.user_id;
+          }
           if (!user_id) return res.status(400).json({ error: 'user_id required' });
           const identity = (req as any).identity;
-          if (identity?.kind === 'pos' && identity.payload.uid !== user_id) {
+          if (!pin && identity?.kind === 'pos' && identity.payload.uid !== user_id) {
             return res.status(403).json({ error: 'Cannot view another user' });
           }
-          if (identity?.kind === 'jwt' && identity.user.id !== user_id) {
+          if (!pin && identity?.kind === 'jwt' && identity.user.id !== user_id) {
             return res.status(403).json({ error: 'Cannot view another user' });
           }
           const supabaseAdmin = getSupabaseAdmin(server);
@@ -1702,16 +1789,36 @@ export function apiPlugin(): Plugin {
         }
       });
 
-      // ---- Purchase Orders: receive delivery (Goods In) ----
+      // ---- Purchase Orders: receive delivery (Goods In, PIN-verified staff allocation) ----
       app.post('/api/purchase-orders/receive', async (req, res) => {
         try {
-          const { po_id, items } = req.body;
+          const { po_id, items, pin } = req.body;
           if (!po_id || !items?.length) return res.status(400).json({ error: 'po_id and items required' });
           const supabaseAdmin = getSupabaseAdmin(server);
 
+          let receiver: { user_id: string; full_name: string } | null = null;
+          if (pin) {
+            if (!/^\d{4,8}$/.test(String(pin))) {
+              return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+            }
+            const tenantSchemaForPin = (req as any).tenantSchema || '';
+            const pinIdentifier = `goods:${tenantSchemaForPin}:${String(pin).length}`;
+            if (await isPosLoginThrottled(authEnv, pinIdentifier)) {
+              return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+            }
+            const { data: tenantUsers } = await supabaseAdmin.from('users').select('user_id, full_name, pin_hash').eq('is_active', true);
+            const staffByPin = (tenantUsers || []).find((u: any) => verifyPin(String(pin), u.pin_hash).ok);
+            if (!staffByPin) {
+              await recordPosAttempt(authEnv, pinIdentifier, false, requestIp(req));
+              return res.status(401).json({ error: 'Invalid PIN' });
+            }
+            await recordPosAttempt(authEnv, pinIdentifier, true, requestIp(req));
+            receiver = { user_id: staffByPin.user_id, full_name: staffByPin.full_name };
+          }
+
           const { data: po } = await supabaseAdmin
             .from('purchase_orders')
-            .select('store_id')
+            .select('store_id, po_number')
             .eq('po_id', po_id)
             .single();
           if (!po) return res.status(404).json({ error: 'PO not found' });
@@ -1778,12 +1885,39 @@ export function apiPlugin(): Plugin {
           if (allFullyReceived) newStatus = 'received';
           else if (anyReceived) newStatus = 'partially_received';
 
-          await supabaseAdmin
-            .from('purchase_orders')
-            .update({ status: newStatus, received_at: new Date().toISOString() })
-            .eq('po_id', po_id);
+          try {
+            await supabaseAdmin
+              .from('purchase_orders')
+              .update({ status: newStatus, received_at: new Date().toISOString(), ...(receiver ? { received_by: receiver.user_id } : {}) })
+              .eq('po_id', po_id);
+          } catch {
+            if (receiver) {
+              await supabaseAdmin
+                .from('purchase_orders')
+                .update({ status: newStatus, received_at: new Date().toISOString() })
+                .eq('po_id', po_id);
+            } else {
+              throw new Error('Failed to update purchase order');
+            }
+          }
 
-          return res.json({ success: true, status: newStatus });
+          if (receiver) {
+            try {
+              await supabaseAdmin
+                .from('logbook')
+                .insert({
+                  entity: 'Purchase Order',
+                  entity_label: po.po_number || po_id.slice(0, 8),
+                  field: 'received_by',
+                  old_value: '',
+                  new_value: receiver.full_name,
+                  username: receiver.full_name,
+                  action: 'receive',
+                });
+            } catch { /* logbook write is non-fatal */ }
+          }
+
+          return res.json({ success: true, status: newStatus, ...(receiver ? { received_by: receiver.user_id } : {}) });
         } catch (err) {
           console.error('Receive delivery error:', err);
           return res.status(500).json({ error: 'Internal server error' });
@@ -1920,8 +2054,8 @@ export function apiPlugin(): Plugin {
 
       app.post('/api/sales/create', async (req, res) => {
         try {
-          const { store_id, staff_user_id, items, total_amount, discount_amount, payment_method, payment_note, loyalty_card_id } = req.body;
-          if (!store_id || !staff_user_id || !Array.isArray(items) || items.length === 0) {
+          const { store_id, staff_user_id, items, total_amount, discount_amount, payment_method, payment_note, loyalty_card_id, pin } = req.body;
+          if (!store_id || !Array.isArray(items) || items.length === 0) {
             return res.status(400).json({ error: 'store_id, staff_user_id, and items required' });
           }
           if (!items.every((i: any) => i && typeof i.plu_id === 'string' && typeof i.plu_name === 'string' && typeof i.quantity === 'number' && i.quantity > 0 && typeof i.unit_price === 'number')) {
@@ -1933,9 +2067,41 @@ export function apiPlugin(): Plugin {
 
           const supabaseAdmin = getSupabaseAdmin(server);
 
-          // POS operator binding: staff tokens can only record their own sales
+          // PIN-verified staff allocation: the PIN authoritatively identifies the
+          // staff on the ticket, independent of whoever opened the terminal.
+          let effectiveStaffId = staff_user_id;
+          let pinVerified = false;
+          if (pin) {
+            if (!/^\d{4,8}$/.test(String(pin))) {
+              return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+            }
+            const tenantSchemaForPin = (req as any).tenantSchema || '';
+            const pinIdentifier = `sale:${tenantSchemaForPin}:${String(pin).length}`;
+            if (await isPosLoginThrottled(authEnv, pinIdentifier)) {
+              return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+            }
+            const { data: tenantUsers } = await supabaseAdmin.from('users').select('user_id, role, is_active, assigned_store_id, pin_hash').eq('is_active', true);
+            const staffByPin = (tenantUsers || []).find((u: any) => verifyPin(String(pin), u.pin_hash).ok);
+            if (!staffByPin) {
+              await recordPosAttempt(authEnv, pinIdentifier, false, requestIp(req));
+              return res.status(401).json({ error: 'Invalid PIN' });
+            }
+            await recordPosAttempt(authEnv, pinIdentifier, true, requestIp(req));
+            const check = verifyPin(String(pin), staffByPin.pin_hash);
+            if (check.upgradedHash) {
+              await supabaseAdmin.from('users').update({ pin_hash: check.upgradedHash }).eq('user_id', staffByPin.user_id);
+            }
+            effectiveStaffId = staffByPin.user_id;
+            pinVerified = true;
+          }
+          if (!effectiveStaffId) {
+            return res.status(400).json({ error: 'store_id, staff_user_id, and items required' });
+          }
+
+          // POS operator binding: without PIN verification the ticket must belong
+          // to the signed-in operator (admins/super admins may operate on behalf of staff)
           const identity = (req as any).identity;
-          if (identity?.kind === 'pos' && identity.payload.role !== 'super_admin' && identity.payload.uid !== staff_user_id) {
+          if (!pinVerified && identity?.kind === 'pos' && identity.payload.role !== 'super_admin' && identity.payload.role !== 'admin' && identity.payload.uid !== effectiveStaffId) {
             return res.status(403).json({ error: 'Sale must be recorded against the signed-in staff member' });
           }
 
@@ -1964,12 +2130,12 @@ export function apiPlugin(): Plugin {
           // Validate staff: active tenant user (or super-admin override) with access to this store
           const { data: staff } = await supabaseAdmin.from('users')
             .select('user_id, role, is_active, assigned_store_id')
-            .eq('user_id', staff_user_id)
+            .eq('user_id', effectiveStaffId)
             .maybeSingle();
           if (!staff || !staff.is_active) {
             return res.status(401).json({ error: 'Invalid staff member' });
           }
-          if (staff.role !== 'super_admin' && staff.assigned_store_id !== store_id) {
+          if (staff.role !== 'super_admin' && staff.role !== 'admin' && staff.assigned_store_id !== store_id) {
             return res.status(403).json({ error: 'Staff member is not assigned to this store' });
           }
 
@@ -1993,7 +2159,7 @@ export function apiPlugin(): Plugin {
           // Create transaction
           const { data: transaction, error: txErr } = await supabaseAdmin.from('sales_transactions').insert({
             store_id,
-            staff_user_id,
+            staff_user_id: effectiveStaffId,
             total_amount: total,
             discount_amount: discount,
             payment_method,
@@ -2634,6 +2800,10 @@ export function apiPlugin(): Plugin {
         try {
           const schema = req.query.schema as string;
           if (!schema) return res.status(400).json({ error: 'schema query param required' });
+          const identity = (req as any).identity;
+          if (identity?.kind === 'pos' && identity.payload.role === 'admin' && identity.payload.schema !== schema) {
+            return res.status(403).json({ error: 'Not a member of this tenant' });
+          }
           const tenantAdmin = getSupabaseAdmin(server, schema);
           const { data, error } = await tenantAdmin.from('stores').select('*').eq('is_active', true).order('name');
           if (error) return res.status(500).json({ error: error.message });

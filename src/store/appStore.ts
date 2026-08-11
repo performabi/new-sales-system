@@ -143,9 +143,9 @@ interface AppState {
   // Clock
   clockStatus: any[];
   clockStatusLoading: boolean;
-  fetchClockStatus: (userId: string) => Promise<void>;
-  clockIn: (storeId: string, userId: string) => Promise<{ error: string | null }>;
-  clockOut: (userId: string) => Promise<{ error: string | null }>;
+  fetchClockStatus: (userId: string, pin?: string) => Promise<void>;
+  clockIn: (storeId: string, userId: string, pin?: string) => Promise<{ error: string | null }>;
+  clockOut: (userId: string, pin?: string) => Promise<{ error: string | null }>;
 
   // Checklists (POS)
   checklists: any[];
@@ -161,7 +161,7 @@ interface AppState {
   pendingPOs: any[];
   pendingPOsLoading: boolean;
   fetchPendingPOs: (storeId: string) => Promise<void>;
-  receiveDelivery: (poId: string, items: { plu_id: string; qty_received: number }[]) => Promise<{ error: string | null }>;
+  receiveDelivery: (poId: string, items: { plu_id: string; qty_received: number }[], pin: string) => Promise<{ error: string | null }>;
 
   // Currency Config
   currencyConfig: CurrencyConfig | null;
@@ -193,7 +193,7 @@ interface AppState {
   // Basket / Cart
   basketTabs: BasketTab[];
   activeTabId: string | null;
-  openNewBasket: (staffUserId: string, staffName: string) => void;
+  openNewBasket: (staffUserId: string, staffName: string, staffPin?: string | null) => void;
   switchBasket: (tabId: string) => void;
   closeBasket: (tabId: string) => void;
   addToBasket: (item: BasketItem) => void;
@@ -228,6 +228,7 @@ export interface BasketTab {
   tabId: string;
   staffUserId: string;
   staffName: string;
+  staffPin: string | null;
   items: BasketItem[];
   discount: number;
   loyaltyCardId: string | null;
@@ -1293,10 +1294,12 @@ export const useAppStore = create<AppState>((set, get) => ({
   clockStatus: [],
   clockStatusLoading: false,
 
-  fetchClockStatus: async (userId) => {
+  fetchClockStatus: async (userId, pin?) => {
     set({ clockStatusLoading: true });
     try {
-      const res = await apiFetch(`/api/pos/clock-status?user_id=${encodeURIComponent(userId)}`);
+      let url = `/api/pos/clock-status?user_id=${encodeURIComponent(userId)}`;
+      if (pin) url += `&pin=${encodeURIComponent(pin)}`;
+      const res = await apiFetch(url);
       if (!res.ok) throw new Error('Failed to fetch clock status');
       const data = await res.json();
       set({ clockStatus: data });
@@ -1307,12 +1310,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  clockIn: async (storeId, userId) => {
+  clockIn: async (storeId, userId, pin?) => {
     try {
       const res = await apiFetch('/api/pos/clock-in', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ store_id: storeId, user_id: userId }),
+        body: JSON.stringify({ store_id: storeId, user_id: userId, ...(pin ? { pin } : {}) }),
       });
       const result = await res.json();
       if (!res.ok) return { error: result.error || 'Failed to clock in' };
@@ -1323,12 +1326,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  clockOut: async (userId) => {
+  clockOut: async (userId, pin?) => {
     try {
       const res = await apiFetch('/api/pos/clock-out', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: userId }),
+        body: JSON.stringify({ user_id: userId, ...(pin ? { pin } : {}) }),
       });
       const result = await res.json();
       if (!res.ok) return { error: result.error || 'Failed to clock out' };
@@ -1425,12 +1428,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  receiveDelivery: async (poId, items) => {
+  receiveDelivery: async (poId, items, pin) => {
     try {
       const res = await apiFetch('/api/purchase-orders/receive', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ po_id: poId, items }),
+        body: JSON.stringify({ po_id: poId, items, pin }),
       });
       const result = await res.json();
       if (!res.ok) return { error: result.error || 'Failed to receive delivery' };
@@ -1638,12 +1641,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   basketTabs: [],
   activeTabId: null,
 
-  openNewBasket: (staffUserId, staffName) => set((state) => {
+  openNewBasket: (staffUserId, staffName, staffPin = null) => set((state) => {
     const tabId = `tab_${Date.now()}`;
     const newTab = {
       tabId,
       staffUserId,
       staffName,
+      staffPin,
       items: [],
       discount: 0,
       loyaltyCardId: null as string | null,

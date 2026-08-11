@@ -22,6 +22,7 @@ interface AuthState {
   initialize: () => Promise<void>;
   signIn: (email: string, password: string) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
+  logout: () => Promise<void>;
   changePassword: (newPassword: string) => Promise<{ error: string | null }>;
   resetPassword: (email: string) => Promise<{ error: string | null }>;
   updatePassword: (newPassword: string) => Promise<{ error: string | null }>;
@@ -149,6 +150,15 @@ export const useAuthStore = create<AuthState>((set, get) => ({
     sessionStorage.removeItem('pos_store_id');
     sessionStorage.removeItem('pos_store_name');
     set({ session: null, user: null, profile: null, superUser: null, userType: null, activeTenantSchema: null, pendingTenants: null });
+  },
+
+  logout: async () => {
+    await get().signOut();
+    sessionStorage.removeItem('pos_user_id');
+    sessionStorage.removeItem('pos_user_name');
+    sessionStorage.removeItem('pos_user_role');
+    sessionStorage.removeItem('pos_store_number');
+    window.location.href = '/';
   },
 
   changePassword: async (newPassword) => {

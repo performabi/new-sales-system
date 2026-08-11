@@ -111,6 +111,22 @@
   letter-spacing: 0.04em;
 }
 
+.terminal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 8px 20px;
+  background: var(--bg-secondary);
+  border-top: 1px solid var(--border-medium);
+  flex-shrink: 0;
+}
+
+.terminal-footer-user {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+
 @media (max-width: 768px) {
   .terminal-content {
     padding: 16px;

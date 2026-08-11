@@ -11,7 +11,7 @@ interface PinResult {
 interface PinPromptProps {
   isOpen: boolean;
   onClose: () => void;
-  onSuccess: (user: PinResult) => void;
+  onSuccess: (user: PinResult, pin: string) => void;
   title?: string;
 }
 
@@ -30,7 +30,7 @@ export default function PinPrompt({ isOpen, onClose, onSuccess, title }: PinProm
       const res = await fetch('/api/pos/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin, tenant_schema: tenantSchema }),
+        body: JSON.stringify({ pin, tenant_schema: tenantSchema, verify_only: true }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -39,12 +39,10 @@ export default function PinPrompt({ isOpen, onClose, onSuccess, title }: PinProm
         setSubmitting(false);
         return;
       }
-      if (data.pos_token) {
-        sessionStorage.setItem('pos_token', data.pos_token);
-      }
+      const submittedPin = pin;
       setPin('');
       setSubmitting(false);
-      onSuccess(data.user);
+      onSuccess(data.user, submittedPin);
     } catch {
       setError('Network error');
       setSubmitting(false);

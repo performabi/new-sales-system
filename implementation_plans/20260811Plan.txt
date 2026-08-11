@@ -208,3 +208,20 @@ NOTES / DECISIONS (locked in 2026-08-11)
 - 0c/0d prod check (2026-08-11, commit 77f904c, deployment n6pn1h444):
   public routes 200, protected routes 401, pin-login 400, log scan clean
   (no ERR_MODULE_NOT_FOUND / FUNCTION_INVOCATION_FAILED / 500s)
+- 0e/0f/0g dev smoke (2026-08-11, port 5174, temp users minted + cleaned):
+  All green (1 environment-caused 429 on repeated wrong-PIN check — throttle
+  verified working; 401 wrong-PIN verified in preceding clean run):
+  - tenant admin pin-login -> kind:admin + tenant_schema + pending token
+  - admin/stores with pending token (own schema) 200 (3 stores);
+    other schema 403; admin/tenants 403 (tenant admin restricted)
+  - admin-finalize wrong tenant 403; correct store -> pos token role admin
+  - clock-in/clock-status/clock-out with staff pin on ADMIN terminal ->
+    allocated to staff user; wrong pin 401; good PIN 429 after repeats
+  - staff pin-login regression -> kind:user + assigned store
+  - sale with staff pin on admin terminal -> staff allocated;
+    wrong pin 401; no-pin own-token legacy path works
+  - goods-in receive with staff pin -> success; logbook entry written
+    ("received_by, Smoke Staff"); wrong pin 401
+  Runtime alert for the user: received_by column lands only after running
+  supabase/migrations/007_add_received_by.sql (per tenant schema); route
+  retries without the column pre-migration so nothing breaks meanwhile.

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../../store/appStore';
+import PinPrompt from '../../components/Pos/PinPrompt';
 
 export default function GoodsIn() {
   const { pendingPOs, pendingPOsLoading, fetchPendingPOs, receiveDelivery } = useAppStore();
@@ -10,6 +11,8 @@ export default function GoodsIn() {
   const [selectedPO, setSelectedPO] = useState<string | null>(null);
   const [receivedQty, setReceivedQty] = useState<Record<string, number>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [showPin, setShowPin] = useState(false);
+  const [pin, setPin] = useState<string | null>(null);
 
   useEffect(() => {
     if (storeId) {
@@ -32,12 +35,16 @@ export default function GoodsIn() {
 
   const handleConfirmReceive = async () => {
     if (!selectedPO) return;
+    if (!pin) {
+      setShowPin(true);
+      return;
+    }
     const items = Object.entries(receivedQty)
       .filter(([, qty]) => qty > 0)
       .map(([plu_id, qty_received]) => ({ plu_id, qty_received }));
     if (items.length === 0) return;
     setSubmitting(true);
-    const { error } = await receiveDelivery(selectedPO, items);
+    const { error } = await receiveDelivery(selectedPO, items, pin);
     setSubmitting(false);
     if (error) return;
     setSelectedPO(null);
@@ -141,6 +148,13 @@ export default function GoodsIn() {
           )}
         </div>
       )}
+
+      <PinPrompt
+        isOpen={showPin}
+        onClose={() => setShowPin(false)}
+        onSuccess={(_u, enteredPin) => { setPin(enteredPin); setShowPin(false); }}
+        title="Enter staff PIN to confirm receipt"
+      />
     </div>
   );
 }

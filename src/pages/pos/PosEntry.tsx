@@ -26,6 +26,7 @@ export default function PosEntry() {
   const [stores, setStores] = useState<PosStore[]>([]);
   const [tenants, setTenants] = useState<Tenant[]>([]);
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null);
+  const [adminSchema, setAdminSchema] = useState<string | null>(null);
   const [loadingStores, setLoadingStores] = useState(false);
   const [storeError, setStoreError] = useState<string | null>(null);
   const navigate = useNavigate();
@@ -77,7 +78,13 @@ export default function PosEntry() {
       setPin('');
       setSubmitting(false);
       if (data.kind === 'admin') {
-        fetchTenants();
+        if (data.tenant_schema) {
+          setAdminSchema(data.tenant_schema);
+          fetchStoresForSchema(data.tenant_schema);
+        } else {
+          setAdminSchema(null);
+          fetchTenants();
+        }
       } else {
         sessionStorage.setItem('pos_store_id', data.user.assigned_store_id);
         if (data.user.assigned_store_name) {
@@ -112,10 +119,15 @@ export default function PosEntry() {
 
   const handleTenantSelect = async (tenant: Tenant) => {
     setSelectedTenant(tenant);
+    const schema = `tenant_${tenant.tenant_id.replace(/-/g, '')}`;
+    void fetchStoresForSchema(schema);
+  };
+
+  const fetchStoresForSchema = async (schema: string) => {
+    setStep('store');
     setLoadingStores(true);
     setStoreError(null);
     try {
-      const schema = `tenant_${tenant.tenant_id.replace(/-/g, '')}`;
       const headers = new Headers();
       const posToken = sessionStorage.getItem('pos_token');
       if (posToken) headers.set('X-POS-Token', posToken);
@@ -131,9 +143,9 @@ export default function PosEntry() {
   };
 
   const handleStoreSelect = async (store: PosStore) => {
-    if (!selectedTenant) { setStep('pin'); return; }
+    const schema = adminSchema || (selectedTenant ? `tenant_${selectedTenant.tenant_id.replace(/-/g, '')}` : null);
+    if (!schema) { setStep('pin'); return; }
     try {
-      const schema = `tenant_${selectedTenant.tenant_id.replace(/-/g, '')}`;
       const headers = new Headers({ 'Content-Type': 'application/json' });
       const posToken = sessionStorage.getItem('pos_token');
       if (posToken) headers.set('X-POS-Token', posToken);

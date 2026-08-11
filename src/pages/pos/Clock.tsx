@@ -7,6 +7,7 @@ export default function PosClock() {
   const [submitting, setSubmitting] = useState(false);
   const [showPin, setShowPin] = useState(false);
   const [user, setUser] = useState<{ user_id: string; full_name: string } | null>(null);
+  const [pin, setPin] = useState<string | null>(null);
 
   const storeId = sessionStorage.getItem('pos_store_id');
   const storeName = sessionStorage.getItem('pos_store_name') || 'Store';
@@ -16,31 +17,31 @@ export default function PosClock() {
   }, []);
 
   useEffect(() => {
-    if (user?.user_id) {
-      fetchClockStatus(user.user_id);
+    if (user?.user_id && pin) {
+      fetchClockStatus(user.user_id, pin);
     }
-  }, [user?.user_id, fetchClockStatus]);
+  }, [user?.user_id, pin, fetchClockStatus]);
 
   const openEntry = Array.isArray(clockStatus) ? clockStatus.find((e: any) => !e.clock_out) : null;
   const isClockedIn = !!openEntry;
   const todayEntries = Array.isArray(clockStatus) ? clockStatus : [];
 
   const handleClockIn = async () => {
-    if (!storeId || !user?.user_id) return;
+    if (!storeId || !user?.user_id || !pin) return;
     setSubmitting(true);
-    const { error } = await clockIn(storeId, user.user_id);
+    const { error } = await clockIn(storeId, user.user_id, pin);
     setSubmitting(false);
     if (error) return;
-    fetchClockStatus(user.user_id);
+    fetchClockStatus(user.user_id, pin);
   };
 
   const handleClockOut = async () => {
-    if (!user?.user_id) return;
+    if (!user?.user_id || !pin) return;
     setSubmitting(true);
-    const { error } = await clockOut(user.user_id);
+    const { error } = await clockOut(user.user_id, pin);
     setSubmitting(false);
     if (error) return;
-    fetchClockStatus(user.user_id);
+    fetchClockStatus(user.user_id, pin);
   };
 
   const formatDuration = (start: string, end?: string) => {
@@ -122,7 +123,7 @@ export default function PosClock() {
       <PinPrompt
         isOpen={showPin}
         onClose={() => { setShowPin(false); }}
-        onSuccess={(u) => { setUser(u); setShowPin(false); }}
+        onSuccess={(u, enteredPin) => { setUser(u); setPin(enteredPin); setShowPin(false); }}
         title="Enter PIN to access Clock"
       />
     </div>

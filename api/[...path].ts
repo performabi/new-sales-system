@@ -61,9 +61,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   else if (typeof rawPath === 'string') path = rawPath.split('/').filter(Boolean);
   const method = req.method || 'GET';
   const body = req.body || {};
+  let env = {
+    supabaseUrl: process.env.VITE_SUPABASE_URL || '',
+    serviceRole: process.env.SERVICE_ROLE || '',
+    anonKey: process.env.VITE_SUPABASE_ANON_KEY || '',
+  };
+  let schema = '';
 
   try {
-    const env = {
+    env = {
       supabaseUrl: process.env.VITE_SUPABASE_URL || '',
       serviceRole: process.env.SERVICE_ROLE || '',
       anonKey: process.env.VITE_SUPABASE_ANON_KEY || '',
@@ -78,9 +84,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (path[0] === 'admin') {
         const posListing =
           identity.kind === 'pos' &&
-          identity.payload.role === 'super_admin' &&
           method === 'GET' &&
-          (path.join('/') === 'admin/tenants' || path.join('/') === 'admin/stores');
+          ((identity.payload.role === 'super_admin' &&
+            (path.join('/') === 'admin/tenants' || path.join('/') === 'admin/stores')) ||
+            (identity.payload.role === 'admin' &&
+              identity.payload.store_id === 'pending' &&
+              path.join('/') === 'admin/stores'));
         if (identity.kind !== 'jwt' && !posListing) {
           return res.status(403).json({ error: 'Super admin session required' });
         }
@@ -93,7 +102,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    let schema = path[0] === 'admin' ? 'public' : ((req.query.tenant_schema as string) || (req.body?.tenant_schema as string) || '');
+    schema = path[0] === 'admin' ? 'public' : ((req.query.tenant_schema as string) || (req.body?.tenant_schema as string) || '');
     if (path[0] !== 'admin' && !isPublicPath(method, path.join('/'))) {
       if (schema) {
         if (identity && !identityHasSchema(identity, schema)) {
@@ -670,6 +679,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(401).json({ error: 'Please verify your email before using the terminal' });
       }
       await recordPosAttempt(env, identifier, true, requestIp(req));
+      const userPayload = {
+        user_id: user.user_id,
+        username: user.username,
+        full_name: user.full_name,
+        role: user.role,
+        assigned_store_id: user.assigned_store_id,
+        assigned_store_name: (user.stores as any)?.name || null,
+      };
+      if (body.verify_only) {
+        return res.json({ user: userPayload });
+      }
       const posToken = signPosToken(env, {
         uid: user.user_id,
         schema,
@@ -677,14 +697,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         role: user.role,
       });
       return res.json({
-        user: {
-          user_id: user.user_id,
-          username: user.username,
-          full_name: user.full_name,
-          role: user.role,
-          assigned_store_id: user.assigned_store_id,
-          assigned_store_name: (user.stores as any)?.name || null,
-        },
+        user: userPayload,
         pos_token: posToken,
         expires_in: 43200,
       });
@@ -751,6 +764,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         if (authUser?.user && !authUser.user.confirmed_at) {
           await recordPosAttempt(env, identifier, false, requestIp(req));
           return res.status(401).json({ error: 'Please verify your email before using the terminal' });
+        }
+        if (user.role === 'admin') {
+          await recordPosAttempt(env, identifier, true, requestIp(req));
+          const pendingToken = signPosToken(env, {
+            uid: user.user_id,
+            schema,
+            store_id: 'pending',
+            role: 'admin',
+          });
+          return res.json({
+            kind: 'admin',
+            tenant_schema: schema,
+            pending_token: pendingToken,
+            user: { user_id: user.user_id, full_name: user.full_name, role: 'admin' },
+          });
         }
         if (!user.assigned_store_id) {
           await recordPosAttempt(env, identifier, true, requestIp(req));
@@ -849,8 +877,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!tenant_schema || !store_id) {
         return res.status(400).json({ error: 'tenant_schema and store_id required' });
       }
-      if (!identity || identity.kind !== 'pos' || identity.payload.role !== 'super_admin' || identity.payload.store_id !== 'pending') {
+      if (!identity || identity.kind !== 'pos' || (identity.payload.role !== 'super_admin' && identity.payload.role !== 'admin') || identity.payload.store_id !== 'pending') {
         return res.status(403).json({ error: 'Verify your PIN first' });
+      }
+      if (identity.payload.role === 'admin' && identity.payload.schema !== tenant_schema) {
+        return res.status(403).json({ error: 'Not a member of this tenant' });
       }
       const tenantAdmin = getSupabaseAdmin(tenant_schema);
       const { data: store } = await tenantAdmin.from('stores').select('store_id, name').eq('store_id', store_id).maybeSingle();
@@ -860,13 +891,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         uid: identity.payload.uid,
         schema: tenant_schema,
         store_id,
-        role: 'super_admin',
+        role: identity.payload.role,
       });
       return res.json({
         user: {
           user_id: identity.payload.uid,
           full_name: null,
-          role: 'super_admin',
+          role: identity.payload.role,
           assigned_store_id: store_id,
           assigned_store_name: store_name || store.name,
         },
@@ -875,38 +906,87 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    // POS: Clock In (identity-bound)
+    // POS: Clock In (PIN-verified staff allocation)
     if (path[0] === 'pos' && path[1] === 'clock-in' && method === 'POST') {
-      const { store_id, user_id } = body;
-      if (!store_id || !user_id) return res.status(400).json({ error: 'store_id and user_id required' });
-      if (identity?.kind === 'pos' && identity.payload.uid !== user_id) return res.status(403).json({ error: 'Cannot clock in as another user' });
-      if (identity?.kind === 'jwt' && identity.user.id !== user_id) return res.status(403).json({ error: 'Cannot clock in as another user' });
+      const { store_id, user_id, pin } = body;
+      let effectiveUserId = user_id;
+      if (!store_id && !pin) return res.status(400).json({ error: 'store_id and user_id required' });
+      if (pin) {
+        if (!/^\d{4,8}$/.test(String(pin))) return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+        const pinIdentifier = `clock:${schema}:${String(pin).length}`;
+        if (await isPosLoginThrottled(env, pinIdentifier)) {
+          return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+        }
+        const { data: tenantUsers } = await supabaseAdmin.from('users').select('user_id, pin_hash').eq('is_active', true);
+        const staffByPin = (tenantUsers || []).find((u: any) => verifyPin(String(pin), u.pin_hash).ok);
+        if (!staffByPin) {
+          await recordPosAttempt(env, pinIdentifier, false, requestIp(req));
+          return res.status(401).json({ error: 'Invalid PIN' });
+        }
+        await recordPosAttempt(env, pinIdentifier, true, requestIp(req));
+        effectiveUserId = staffByPin.user_id;
+      }
+      if (!store_id || !effectiveUserId) return res.status(400).json({ error: 'store_id and user_id required' });
+      if (!pin && identity?.kind === 'pos' && identity.payload.uid !== effectiveUserId) return res.status(403).json({ error: 'Cannot clock in as another user' });
+      if (!pin && identity?.kind === 'jwt' && identity.user.id !== effectiveUserId) return res.status(403).json({ error: 'Cannot clock in as another user' });
       const { data: store } = await supabaseAdmin.from('stores').select('store_id').eq('store_id', store_id).maybeSingle();
       if (!store) return res.status(400).json({ error: 'Store not found in this tenant' });
-      const { data, error } = await supabaseAdmin.from('staff_timesheets').insert({ store_id, user_id, clock_in: new Date().toISOString() }).select().single();
+      const { data, error } = await supabaseAdmin.from('staff_timesheets').insert({ store_id, user_id: effectiveUserId, clock_in: new Date().toISOString() }).select().single();
       if (error) return res.status(400).json({ error: error.message });
       return res.json({ success: true, timesheet: data });
     }
 
-    // POS: Clock Out (identity-bound)
+    // POS: Clock Out (PIN-verified staff allocation)
     if (path[0] === 'pos' && path[1] === 'clock-out' && method === 'PUT') {
-      const { user_id } = body;
-      if (!user_id) return res.status(400).json({ error: 'user_id required' });
-      if (identity?.kind === 'pos' && identity.payload.uid !== user_id) return res.status(403).json({ error: 'Cannot clock out another user' });
-      if (identity?.kind === 'jwt' && identity.user.id !== user_id) return res.status(403).json({ error: 'Cannot clock out another user' });
-      const { data: open } = await supabaseAdmin.from('staff_timesheets').select('*').eq('user_id', user_id).is('clock_out', null).order('clock_in', { ascending: false }).limit(1).maybeSingle();
+      const { user_id, pin } = body;
+      let effectiveUserId = user_id;
+      if (pin) {
+        if (!/^\d{4,8}$/.test(String(pin))) return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+        const pinIdentifier = `clock:${schema}:${String(pin).length}`;
+        if (await isPosLoginThrottled(env, pinIdentifier)) {
+          return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+        }
+        const { data: tenantUsers } = await supabaseAdmin.from('users').select('user_id, pin_hash').eq('is_active', true);
+        const staffByPin = (tenantUsers || []).find((u: any) => verifyPin(String(pin), u.pin_hash).ok);
+        if (!staffByPin) {
+          await recordPosAttempt(env, pinIdentifier, false, requestIp(req));
+          return res.status(401).json({ error: 'Invalid PIN' });
+        }
+        await recordPosAttempt(env, pinIdentifier, true, requestIp(req));
+        effectiveUserId = staffByPin.user_id;
+      }
+      if (!effectiveUserId) return res.status(400).json({ error: 'user_id required' });
+      if (!pin && identity?.kind === 'pos' && identity.payload.uid !== effectiveUserId) return res.status(403).json({ error: 'Cannot clock out another user' });
+      if (!pin && identity?.kind === 'jwt' && identity.user.id !== effectiveUserId) return res.status(403).json({ error: 'Cannot clock out another user' });
+      const { data: open } = await supabaseAdmin.from('staff_timesheets').select('*').eq('user_id', effectiveUserId).is('clock_out', null).order('clock_in', { ascending: false }).limit(1).maybeSingle();
       if (!open) return res.status(400).json({ error: 'No open clock-in found' });
       const { data, error } = await supabaseAdmin.from('staff_timesheets').update({ clock_out: new Date().toISOString() }).eq('timesheet_id', open.timesheet_id).select().single();
       if (error) return res.status(400).json({ error: error.message });
       return res.json({ success: true, timesheet: data });
     }
 
-    // POS: Clock Status (identity-bound)
+    // POS: Clock Status (PIN-verified view; PIN optional when viewing own timesheet)
     if (path[0] === 'pos' && path[1] === 'clock-status' && method === 'GET') {
-      const user_id = typeof req.query.user_id === 'string' ? req.query.user_id : null;
+      let user_id = typeof req.query.user_id === 'string' ? req.query.user_id : null;
+      const pin = typeof req.query.pin === 'string' && req.query.pin ? String(req.query.pin) : null;
+      if (pin) {
+        if (!/^\d{4,8}$/.test(pin)) return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+        const pinIdentifier = `clock:${schema}:${pin.length}`;
+        if (await isPosLoginThrottled(env, pinIdentifier)) {
+          return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+        }
+        const { data: tenantUsers } = await supabaseAdmin.from('users').select('user_id, pin_hash').eq('is_active', true);
+        const staffByPin = (tenantUsers || []).find((u: any) => verifyPin(pin, u.pin_hash).ok);
+        if (!staffByPin) {
+          await recordPosAttempt(env, pinIdentifier, false, requestIp(req));
+          return res.status(401).json({ error: 'Invalid PIN' });
+        }
+        await recordPosAttempt(env, pinIdentifier, true, requestIp(req));
+        user_id = staffByPin.user_id;
+      }
       if (!user_id) return res.status(400).json({ error: 'user_id required' });
-      if (identity?.kind === 'pos' && identity.payload.uid !== user_id) return res.status(403).json({ error: 'Cannot view another user' });
-      if (identity?.kind === 'jwt' && identity.user.id !== user_id) return res.status(403).json({ error: 'Cannot view another user' });
+      if (!pin && identity?.kind === 'pos' && identity.payload.uid !== user_id) return res.status(403).json({ error: 'Cannot view another user' });
+      if (!pin && identity?.kind === 'jwt' && identity.user.id !== user_id) return res.status(403).json({ error: 'Cannot view another user' });
       const { data, error } = await supabaseAdmin.from('staff_timesheets').select('*').eq('user_id', user_id).order('clock_in', { ascending: false }).limit(5);
       if (error) return res.status(400).json({ error: error.message });
       return res.json(data);
@@ -963,9 +1043,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Purchase Orders: receive delivery (Goods In)
     if (path[0] === 'purchase-orders' && path[1] === 'receive' && method === 'POST') {
-      const { po_id, items } = body;
+      const { po_id, items, pin } = body;
       if (!po_id || !items?.length) return res.status(400).json({ error: 'po_id and items required' });
-      const { data: po } = await supabaseAdmin.from('purchase_orders').select('store_id').eq('po_id', po_id).single();
+      let receiver: { user_id: string; full_name: string } | null = null;
+      if (pin) {
+        if (!/^\d{4,8}$/.test(String(pin))) {
+          return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+        }
+        const pinIdentifier = `goods:${schema}:${String(pin).length}`;
+        if (await isPosLoginThrottled(env, pinIdentifier)) {
+          return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+        }
+        const { data: tenantUsers } = await supabaseAdmin.from('users').select('user_id, full_name, pin_hash').eq('is_active', true);
+        const staffByPin = (tenantUsers || []).find((u: any) => verifyPin(String(pin), u.pin_hash).ok);
+        if (!staffByPin) {
+          await recordPosAttempt(env, pinIdentifier, false, requestIp(req));
+          return res.status(401).json({ error: 'Invalid PIN' });
+        }
+        await recordPosAttempt(env, pinIdentifier, true, requestIp(req));
+        receiver = { user_id: staffByPin.user_id, full_name: staffByPin.full_name };
+      }
+      const { data: po } = await supabaseAdmin.from('purchase_orders').select('store_id, po_number').eq('po_id', po_id).single();
       if (!po) return res.status(404).json({ error: 'PO not found' });
       for (const item of items) {
         const { plu_id, qty_received } = item;
@@ -988,8 +1086,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let newStatus = 'ordered';
       if (allFullyReceived) newStatus = 'received';
       else if (anyReceived) newStatus = 'partially_received';
-      await supabaseAdmin.from('purchase_orders').update({ status: newStatus, received_at: new Date().toISOString() }).eq('po_id', po_id);
-      return res.json({ success: true, status: newStatus });
+      const poUpdate: Record<string, unknown> = { status: newStatus, received_at: new Date().toISOString() };
+      if (receiver) poUpdate.received_by = receiver.user_id;
+      try {
+        await supabaseAdmin.from('purchase_orders').update(poUpdate).eq('po_id', po_id);
+      } catch {
+        if (receiver) {
+          delete poUpdate.received_by;
+          await supabaseAdmin.from('purchase_orders').update(poUpdate).eq('po_id', po_id);
+        } else {
+          throw new Error('Failed to update purchase order');
+        }
+      }
+      if (receiver) {
+        try {
+          await supabaseAdmin.from('logbook').insert({
+            entity: 'Purchase Order',
+            entity_label: po.po_number || po_id.slice(0, 8),
+            field: 'received_by',
+            old_value: '',
+            new_value: receiver.full_name,
+            username: receiver.full_name,
+            action: 'receive',
+          });
+        } catch { /* logbook write is non-fatal */ }
+      }
+      return res.json({ success: true, status: newStatus, ...(receiver ? { received_by: receiver.user_id } : {}) });
     }
 
     // Settings: get currency
@@ -1071,9 +1193,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Sales: create (server-validated totals, payment allowlist, persisted cashback)
     if (path[0] === 'sales' && path[1] === 'create' && method === 'POST') {
-      const { store_id, staff_user_id, items, total_amount, discount_amount, payment_method, payment_note, loyalty_card_id } = body;
+      const { store_id, staff_user_id, items, total_amount, discount_amount, payment_method, payment_note, loyalty_card_id, pin } = body;
       const PAYMENT_METHODS = ['cash', 'card', 'bank_transfer', 'contactless', 'transfer'];
-      if (!store_id || !staff_user_id || !Array.isArray(items) || items.length === 0) {
+      if (!store_id || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: 'store_id, staff_user_id, and items required' });
       }
       if (!items.every((i: any) => i && typeof i.plu_id === 'string' && typeof i.plu_name === 'string' && typeof i.quantity === 'number' && i.quantity > 0 && typeof i.unit_price === 'number')) {
@@ -1100,14 +1222,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           return res.status(400).json({ error: `Price mismatch for ${item.plu_name}: expected ${expected}` });
         }
       }
+      // PIN-verified staff allocation: the PIN authoritatively identifies the staff
+      // on the ticket, independent of whoever opened the terminal.
+      let effectiveStaffId = staff_user_id;
+      let pinVerified = false;
+      if (pin) {
+        if (!/^\d{4,8}$/.test(String(pin))) return res.status(400).json({ error: 'PIN must be 4-8 digits' });
+        const pinIdentifier = `sale:${schema}:${String(pin).length}`;
+        if (await isPosLoginThrottled(env, pinIdentifier)) {
+          return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
+        }
+        const { data: tenantUsers } = await supabaseAdmin.from('users').select('user_id, role, is_active, assigned_store_id, pin_hash').eq('is_active', true);
+        const staffByPin = (tenantUsers || []).find((u: any) => verifyPin(String(pin), u.pin_hash).ok);
+        if (!staffByPin) {
+          await recordPosAttempt(env, pinIdentifier, false, requestIp(req));
+          return res.status(401).json({ error: 'Invalid PIN' });
+        }
+        await recordPosAttempt(env, pinIdentifier, true, requestIp(req));
+        const check = verifyPin(String(pin), staffByPin.pin_hash);
+        if (check.upgradedHash) {
+          await supabaseAdmin.from('users').update({ pin_hash: check.upgradedHash }).eq('user_id', staffByPin.user_id);
+        }
+        effectiveStaffId = staffByPin.user_id;
+        pinVerified = true;
+      }
+      if (!effectiveStaffId) {
+        return res.status(400).json({ error: 'store_id, staff_user_id, and items required' });
+      }
       const { data: staff } = await supabaseAdmin.from('users')
-        .select('user_id, role, is_active, assigned_store_id').eq('user_id', staff_user_id).maybeSingle();
+        .select('user_id, role, is_active, assigned_store_id').eq('user_id', effectiveStaffId).maybeSingle();
       if (!staff || !staff.is_active) return res.status(401).json({ error: 'Invalid staff member' });
-      if (staff.role !== 'super_admin' && staff.assigned_store_id !== store_id) {
+      if (staff.role !== 'super_admin' && staff.role !== 'admin' && staff.assigned_store_id !== store_id) {
         return res.status(403).json({ error: 'Staff member is not assigned to this store' });
       }
-      // POS operator binding: staff tokens can only record their own sales
-      if (identity?.kind === 'pos' && identity.payload.role !== 'super_admin' && identity.payload.uid !== staff_user_id) {
+      // POS operator binding: without PIN verification the ticket must belong to the
+      // signed-in operator (admins/super admins may operate on behalf of staff).
+      if (!pinVerified && identity?.kind === 'pos' && identity.payload.role !== 'super_admin' && identity.payload.role !== 'admin' && identity.payload.uid !== effectiveStaffId) {
         return res.status(403).json({ error: 'Sale must be recorded against the signed-in staff member' });
       }
       const computedTotal = round2(items.reduce((sum: number, i: any) => sum + round2(i.quantity * i.unit_price), 0));
@@ -1123,7 +1273,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const percent = settings?.value?.percent ?? 0;
       const cashbackEarned = loyalty_card_id && percent > 0 ? round2((total * percent) / 100) : 0;
       const { data: transaction, error: txErr } = await supabaseAdmin.from('sales_transactions').insert({
-        store_id, staff_user_id, total_amount: total, discount_amount: discount,
+        store_id, staff_user_id: effectiveStaffId, total_amount: total, discount_amount: discount,
         payment_method, payment_note: payment_note || null,
         loyalty_card_id: loyalty_card_id || null,
         cashback_percent: percent, cashback_earned: cashbackEarned,
@@ -1617,6 +1767,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (path[0] === 'admin' && path[1] === 'stores' && method === 'GET') {
       const schema = (req.query as any).schema as string;
       if (!schema) return res.status(400).json({ error: 'schema query param required' });
+      if (identity?.kind === 'pos' && identity.payload.role === 'admin' && identity.payload.schema !== schema) {
+        return res.status(403).json({ error: 'Not a member of this tenant' });
+      }
       const tenantAdmin = getSupabaseAdmin(schema);
       const { data, error } = await tenantAdmin.from('stores').select('*').eq('is_active', true).order('name');
       if (error) return res.status(500).json({ error: error.message });

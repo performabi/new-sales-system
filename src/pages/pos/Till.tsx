@@ -12,6 +12,7 @@ import PaymentModal from '../../components/Pos/PaymentModal';
 import WeightModal from '../../components/Pos/WeightModal';
 import ReceiptModal from '../../components/Pos/ReceiptModal';
 import TillNotificationBar from '../../components/Pos/TillNotificationBar';
+import { useAuthStore } from '../../store/authStore';
 import type { Plu } from '../../types';
 
 const NAV_ITEMS = [
@@ -54,7 +55,7 @@ export default function Till() {
   const [lastTransaction, setLastTransaction] = useState<any>(null);
   const [showPinPrompt, setShowPinPrompt] = useState(false);
   const [pinTitle, setPinTitle] = useState('');
-  const [pinCallback, setPinCallback] = useState<((user: any) => void) | null>(null);
+  const [pinCallback, setPinCallback] = useState<((user: any, pin: string) => void) | null>(null);
   const [currencyConfig, setCurrencyConfig] = useState<any>(null);
   const [weightPlu, setWeightPlu] = useState<Plu | null>(null);
 
@@ -91,8 +92,8 @@ export default function Till() {
   const handlePluSelect = (plu: Plu) => {
     if (!activeTabId) {
       setPinTitle('Enter PIN to open basket');
-      setPinCallback(() => (user: any) => {
-        openNewBasket(user.user_id, user.full_name);
+      setPinCallback(() => (user: any, pin: string) => {
+        openNewBasket(user.user_id, user.full_name, pin);
         addBasketItem(plu);
       });
       setShowPinPrompt(true);
@@ -165,6 +166,7 @@ export default function Till() {
     const result = await createSale({
       store_id: storeId,
       staff_user_id: tab.staffUserId,
+      pin: tab.staffPin || undefined,
       items: tab.items.map((i: any) => ({
         plu_id: i.plu_id,
         plu_name: i.name,
@@ -233,15 +235,15 @@ export default function Till() {
 
   const handleNewTab = () => {
     setPinTitle('Enter PIN to open new tab');
-    setPinCallback(() => (user: any) => {
-      openNewBasket(user.user_id, user.full_name);
+    setPinCallback(() => (user: any, pin: string) => {
+      openNewBasket(user.user_id, user.full_name, pin);
     });
     setShowPinPrompt(true);
   };
 
-  const handlePinSuccess = (user: any) => {
+  const handlePinSuccess = (user: any, pin: string) => {
     setShowPinPrompt(false);
-    pinCallback?.(user);
+    pinCallback?.(user, pin);
     setPinCallback(null);
   };
 
@@ -304,6 +306,13 @@ export default function Till() {
                 {now.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
               </span>
               <WeightMonitor weight={null} />
+              <button
+                className="btn btn-ghost"
+                style={{ fontSize: '0.75rem', padding: '4px 10px', border: '1px solid rgba(255,255,255,0.35)' }}
+                onClick={async () => { await useAuthStore.getState().logout(); }}
+              >
+                Logout
+              </button>
             </div>
           </div>
           <PluGrid items={filteredPlu} storeId={storeId} onSelect={handlePluSelect} getEffectivePrice={getEffectivePrice} />

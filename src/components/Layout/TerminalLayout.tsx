@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import ToastContainer from '../UI/ToastContainer';
 import { useThemeStore } from '../../store/themeStore';
+import { useAuthStore } from '../../store/authStore';
 import './TerminalLayout.css';
 
 const NAV_ITEMS = [
@@ -23,10 +24,18 @@ function getPosStoreName() {
   return sessionStorage.getItem('pos_store_name') || 'Store';
 }
 
+function getPosUserName() {
+  return sessionStorage.getItem('pos_user_name') || sessionStorage.getItem('pos_user_role') || '';
+}
+
 export default function TerminalLayout() {
   const navigate = useNavigate();
   const location = useLocation();
   const [storeId, setStoreId] = useState<string | null>(getPosStoreId());
+
+  const handleLogout = async () => {
+    await useAuthStore.getState().logout();
+  };
 
   useEffect(() => {
     document.title = 'Terminal';
@@ -95,6 +104,19 @@ export default function TerminalLayout() {
             </button>
           ))}
         </nav>
+      )}
+
+      {!isTillPage && (
+        <footer className="terminal-footer">
+          {getPosUserName() && <span className="terminal-footer-user">{getPosUserName()}</span>}
+          <button
+            className="btn btn-ghost"
+            style={{ fontSize: '0.75rem', padding: '4px 10px' }}
+            onClick={handleLogout}
+          >
+            Logout
+          </button>
+        </footer>
       )}
 
       <ToastContainer />

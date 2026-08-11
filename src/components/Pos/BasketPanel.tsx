@@ -8,7 +8,7 @@ interface BasketPanelProps {
   onNewTab: () => void;
   showPinPrompt: boolean;
   pinTitle: string;
-  onPinSuccess: (user: any) => void;
+  onPinSuccess: (user: any, pin: string) => void;
   onClosePin: () => void;
   currencySymbol?: string;
 }
