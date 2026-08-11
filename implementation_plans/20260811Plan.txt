@@ -201,3 +201,10 @@ NOTES / DECISIONS (locked in 2026-08-11)
 - All money displays use formatCurrency util (currencyConfig symbol)
 - Both server implementations (Express apiPlugin.ts + Vercel [...path].ts)
   must stay in sync
+- 0c/0d dev smoke (2026-08-11, port 5174, temp SERVICE_ROLE-minted session):
+  create with unique PIN 200; duplicate PIN 400 "This PIN is already in use
+  by another user in this tenant"; self-PIN change 200 (self excluded);
+  cross-user PIN change 400; unique PIN change 200. Test users cleaned up.
+- 0c/0d prod check (2026-08-11, commit 77f904c, deployment n6pn1h444):
+  public routes 200, protected routes 401, pin-login 400, log scan clean
+  (no ERR_MODULE_NOT_FOUND / FUNCTION_INVOCATION_FAILED / 500s)
