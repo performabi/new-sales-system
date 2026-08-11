@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import ToastContainer from '../UI/ToastContainer';
+import { useThemeStore } from '../../store/themeStore';
 import './TerminalLayout.css';
 
 const NAV_ITEMS = [
@@ -35,6 +36,17 @@ export default function TerminalLayout() {
       navigate('/pos/select-store', { replace: true });
     }
   }, [navigate]);
+
+  useEffect(() => {
+    const el = document.documentElement;
+    const stored = useThemeStore.getState().theme;
+    el.classList.remove('theme-light', 'theme-dark');
+    el.classList.add('theme-dark');
+    return () => {
+      el.classList.remove('theme-light', 'theme-dark');
+      el.classList.add(`theme-${stored}`);
+    };
+  }, []);
 
   if (!storeId) return null;
 

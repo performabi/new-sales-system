@@ -1,10 +1,11 @@
 /* =============================================
    Brand Identity
    Background: #0a1929 → dark petroleum
-   Primary:    #088f8f (teal)
+   Primary:    #087676 (teal, dark-adjusted for AA contrast)
    Accent:     #67ffa6 (mint neon)
    Secondary:  #004f6d (deep teal)
-   Error:      #ffbd59 (peach/gold)
+   Error:      #b02a37 (deep red, AA adjusted)
+   Warning:    #ffbd59 (peach/gold)
    Style:      Glassmorphism, translucent, slight neon
    Tone:       Formal, premium
    ============================================= */
@@ -34,10 +35,10 @@
    ================================================================ */
 .theme-light, :root:not(.theme-dark) {
   /* Brand */
-  --primary:        #088f8f;
-  --primary-hover:  #06a8a8;
-  --primary-light:  rgba(8, 143, 143, 0.10);
-  --primary-glow:   0 0 18px rgba(8, 143, 143, 0.25);
+  --primary:        #087676;
+  --primary-hover:  #067e7e;
+  --primary-light:  rgba(8, 118, 118, 0.10);
+  --primary-glow:   0 0 18px rgba(8, 118, 118, 0.25);
 
   --accent:         #67ffa6;
   --accent-light:   rgba(103, 255, 166, 0.12);
@@ -49,14 +50,14 @@
   --secondary-glow:   0 0 14px rgba(0, 79, 109, 0.20);
 
   /* Semantic */
-  --success:       #34d399;
+  --success:       #06794c;
   --success-light: rgba(52, 211, 153, 0.10);
-  --error:         #DC3545;
+  --error:         #b02a37;
   --error-light:   rgba(255, 189, 89, 0.15);
   --warning:       #ffbd59;
   --warning-light: rgba(255, 189, 89, 0.15);
-  --info:          #088f8f;
-  --info-light:    rgba(8, 143, 143, 0.10);
+  --info:          var(--primary);
+  --info-light:    rgba(8, 118, 118, 0.10);
 
   /* Surfaces — glassmorphism */
   --bg-gradient:     linear-gradient(145deg, #eef2f7 0%, #f8fafc 100%);
@@ -69,20 +70,24 @@
   --bg-modal:        rgba(255, 255, 255, 0.75);
   --bg-input:        rgba(255, 255, 255, 0.50);
   --bg-input-focus:  rgba(255, 255, 255, 0.80);
+  --bg-primary:      #eef2f7;
+  --bg-secondary:    #f4f6fa;
+  --bg-tertiary:     #ffffff;
 
   /* Text */
   --text-primary:   #1a2332;
   --text-secondary: #5a6a7e;
-  --text-muted:     #8e9bb3;
+  --text-muted:     #5f6e82;
   --text-on-dark:   #e2e8f0;
   --text-on-primary: #ffffff;
   --text-highlight: #004f6d;
+  --danger:         var(--error);
 
   /* Borders */
   --border-light:   rgba(8, 143, 143, 0.10);
   --border-medium:  rgba(8, 143, 143, 0.20);
   --border-input:   #c8d0dc;
-  --border-input-focus: #088f8f;
+  --border-input-focus: #087676;
 
   /* Shadows — glassmorphism + slight neon */
   --shadow-sm:   0 1px 3px rgba(10, 25, 41, 0.05);
@@ -132,14 +137,18 @@
   --bg-modal:        rgba(13, 25, 41, 0.65);
   --bg-input:        rgba(13, 25, 41, 0.50);
   --bg-input-focus:  rgba(18, 34, 56, 0.70);
+  --bg-primary:      #0a1427;
+  --bg-secondary:    #0d1f33;
+  --bg-tertiary:     #112238;
 
   /* Text */
   --text-primary:   #edf2f7;
   --text-secondary: #94a3b8;
-  --text-muted:     #64748b;
+  --text-muted:     #7d8ba1;
   --text-on-dark:   #edf2f7;
   --text-on-primary: #050b14;
   --text-highlight: #67ffa6;
+  --danger:         #fda4a4;
 
   /* Borders */
   --border-light:   rgba(14, 165, 165, 0.10);
@@ -248,11 +257,11 @@ a:hover { color: var(--primary-hover); }
 .btn-primary {
   background: var(--primary);
   color: var(--text-on-primary);
-  box-shadow: 0 2px 8px rgba(8, 143, 143, 0.30), var(--primary-glow);
+  box-shadow: 0 2px 8px rgba(8, 118, 118, 0.30), var(--primary-glow);
 }
 .btn-primary:hover {
   background: var(--primary-hover);
-  box-shadow: 0 4px 16px rgba(8, 143, 143, 0.45), var(--primary-glow);
+  box-shadow: 0 4px 16px rgba(8, 118, 118, 0.45), var(--primary-glow);
   transform: translateY(-1px);
 }
 
@@ -387,7 +396,7 @@ a:hover { color: var(--primary-hover); }
 
 .form-error {
   font-size: 0.78rem;
-  color: var(--error);
+  color: var(--danger);
   margin-top: 2px;
 }
 
@@ -468,7 +477,7 @@ a:hover { color: var(--primary-hover); }
 }
 .copy-chip:hover {
   border-style: solid;
-  box-shadow: 0 0 10px rgba(8, 143, 143, 0.25);
+  box-shadow: 0 0 10px rgba(8, 118, 118, 0.25);
 }
 
 
@@ -828,4 +837,46 @@ a:hover { color: var(--primary-hover); }
 
 @media (max-width: 480px) {
   .stats-grid { grid-template-columns: 1fr; }
+}
+
+/* ================================================================
+   THEME OVERRIDES — WCAG AA contrast (2.x)
+   ================================================================ */
+/* Light mode: accent outline button uses deep secondary instead of mint,
+   which is unreadable (≈1.1:1) on light surfaces */
+.theme-light .btn-accent-outline,
+:root:not(.theme-dark) .btn-accent-outline {
+  color: var(--secondary);
+  border-color: var(--secondary);
+  box-shadow: 0 0 12px rgba(0, 79, 109, 0.15), inset 0 0 8px rgba(0, 79, 109, 0.08);
+}
+.theme-light .btn-accent-outline:hover,
+:root:not(.theme-dark) .btn-accent-outline:hover {
+  background: var(--secondary);
+  color: #fff;
+  border-color: var(--secondary);
+  box-shadow: 0 4px 18px rgba(0, 79, 109, 0.40);
+}
+
+/* Light mode: warning badge text must be darker than the brand amber */
+.theme-light .badge-warning,
+:root:not(.theme-dark) .badge-warning {
+  color: #7a5c00;
+}
+
+/* Dark mode: bright toast/danger backgrounds need dark text (white ≈2–3:1) */
+.theme-dark .toast {
+  color: #0b1f14;
+}
+.theme-dark .toast-close {
+  color: rgba(0, 0, 0, 0.45);
+}
+.theme-dark .toast-close:hover {
+  color: #000;
+}
+.theme-dark .btn-danger {
+  color: #0b1f14;
+}
+.theme-dark .btn-danger:hover {
+  background: #e67070;
 }
