@@ -223,5 +223,6 @@ NOTES / DECISIONS (locked in 2026-08-11)
   - goods-in receive with staff pin -> success; logbook entry written
     ("received_by, Smoke Staff"); wrong pin 401
   Runtime alert for the user: received_by column lands only after running
-  supabase/migrations/007_add_received_by.sql (per tenant schema); route
+  supabase/migrations/007_add_received_by.sql (DO-block over public.tenants,
+  run once); route
   retries without the column pre-migration so nothing breaks meanwhile.
