@@ -34,7 +34,7 @@ PHASE 0 — Production API outage fix (Vercel serverless)
        into api/[...path].ts; first-segment route families now match 19/19
 [x] 0.3 Local validation: npx tsc -b + npm run build + dev-server smoke
 [x] 0.4 Commit + push -> Vercel auto-deploy
-[ ] 0.5 Verify production (see PHASE 6)
+[x] 0.5 Verify production (see PHASE 6)
 
 ================================================================================
 PHASE 1 — Head-office sales review + dashboard + sidebar
@@ -115,7 +115,7 @@ PHASE 5 — Final verification
 PHASE 6 — Full system check (post-deploy verification)
 ================================================================================
 
-[ ] 6.1 Deployment health
+[x] 6.1 Deployment health
       - vercel inspect: latest production deployment = Ready, contains
         all 3 functions (api/[...path], api/users/[id], api/users/create)
       - Confirm current production alias new-sales-system-rho.vercel.app
@@ -123,10 +123,10 @@ PHASE 6 — Full system check (post-deploy verification)
       - Note: new-sales-system.vercel.app is a STALE alias (SPA 200 but
         /api 404) - do not use it for testing
 
-[ ] 6.2 Runtime error scan
+[x] 6.2 Runtime error scan
       - vercel logs <deploy>: NO ERR_MODULE_NOT_FOUND, NO 500s after smoke
 
-[ ] 6.3 Public-route probe matrix (curl, expect specific codes):
+[x] 6.3 Public-route probe matrix (curl, expect specific codes):
       - GET  /api/stores?tenant_schema=<real tenant>  -> 200 JSON
       - POST /api/pos/pin-login (empty body)          -> 400 (route alive)
       - GET  /api/app/tenant-info                     -> 200/400 JSON
@@ -135,7 +135,7 @@ PHASE 6 — Full system check (post-deploy verification)
       - GET  /app/<slug> deep link                    -> 200 HTML (SPA rewrite)
       - GET  /pos/select-store                        -> 200 HTML (SPA rewrite)
 
-[ ] 6.4 Protected-route probe matrix (curl, no session -> expect 401 JSON,
+[x] 6.4 Protected-route probe matrix (curl, no session -> expect 401 JSON,
       proving the function executes; each must be 401, NOT 500):
       - GET /api/logbook, /api/suppliers, /api/plu, /api/sales,
         /api/plu_scheduled_changes/due,
@@ -156,7 +156,7 @@ PHASE 6 — Full system check (post-deploy verification)
       - POS: PIN login (standard + admin), store selection, make a test sale
       - Loyalty cards page loads
 
-[ ] 6.7 Local dev regression: npm run dev -> stores 200, logbook page loads
+[x] 6.7 Local dev regression: npm run dev -> stores 200, logbook page loads
       (vite plugin path unaffected by .js change)
 
 [ ] 6.8 Mark 5.3/5.4 [x] once 6.6 passes; record results in plan
