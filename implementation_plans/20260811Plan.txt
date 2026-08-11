@@ -8,7 +8,7 @@ Status legend: [ ] = not started   [~] = in progress   [x] = done   [!] = blocke
 PHASE 1 — Head-office sales review + dashboard + sidebar
 ================================================================================
 
-[x] 1.1 Backend: extend /api/sales GET (apiPlugin.ts + [...path].ts)
+[ ] 1.1 Backend: extend /api/sales GET (apiPlugin.ts + [...path].ts)
        - Add start_date / end_date query filters (backwards-compatible)
        - Add optional payment_method filter
 [ ] 1.2 New src/pages/app/Sales.tsx (view-only):
