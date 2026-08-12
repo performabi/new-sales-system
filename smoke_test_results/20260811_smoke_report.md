@@ -116,7 +116,7 @@ Scope applied per decision: **D1–D5 + Inventory/PO UI**. D6/D7/D8 deferred.
 | Zero-qty receive: no `received_at` restamp (D4) | restamped | **PASS** `received_at` unchanged |
 | PIN login → sale with staff allocation | 200 | **PASS** |
 
-Confirmed DEV 7/7. Build (`npx tsc -b` + `npm run build`) green.
+Confirmed DEV 7/7 and **PROD 12/12** (post-deploy re-run: sale deducts `/api/sales/create` legacy uuid-name row, void restores, over-receive 400, zero-qty no-restamp) on commit `364ff1f`. Build (`npx tsc -b` + `npm run build`) green.
 
 ### What changed
 - **D1/P0-1 Canonical lookup chain** (both `apiPlugin.ts` and `api/[...path].ts`): inventory resolution now tries `plu_id` → `name = plu.name` → legacy `name = plu_id` (uuid rows) → create row (floor 0) then decrement. Applies to sale deduct, sale void restore, and goods-in receive.
