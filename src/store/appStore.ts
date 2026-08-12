@@ -597,16 +597,24 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ inventoryLoading: true });
     try {
       const supabase = getClient();
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('inventory')
-        .select('*, stores(name)')
-        .order('name');
+        .select('*, stores(name), plu(plu_id, plu_number, name, plu_categories(name))');
+      if (error) {
+        // Pre-migration fallback: plu_id column not added yet (008)
+        ({ data, error } = await supabase.from('inventory').select('*, stores(name)'));
+      }
       if (error) throw error;
       const mapped = (data ?? []).map((item: any) => ({
         ...item,
         store_name: item.stores?.name ?? 'Unknown',
+        product_name: item.plu?.name ?? item.name,
+        plu_number: item.plu?.plu_number ?? '',
+        category_name: item.plu?.plu_categories?.name ?? '',
         stores: undefined,
+        plu: undefined,
       })) as InventoryItem[];
+      mapped.sort((a, b) => (a.product_name || '').localeCompare(b.product_name || ''));
       set({ inventory: mapped });
     } catch (err) {
       console.error('fetchInventory error:', err);

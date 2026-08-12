@@ -910,14 +910,15 @@ export function apiPlugin(): Plugin {
               .maybeSingle();
 
             if (existingItem) {
-              await supabaseAdmin
+              const upd = await supabaseAdmin
                 .from('purchase_order_items')
                 .update({
                   quantity_ordered: existingItem.quantity_ordered + Number(item.quantity_ordered)
                 })
                 .eq('po_item_id', existingItem.po_item_id);
+              if (upd.error) return res.status(400).json({ error: upd.error.message });
             } else {
-              await supabaseAdmin
+              const ins = await supabaseAdmin
                 .from('purchase_order_items')
                 .insert({
                   po_id: po.po_id,
@@ -925,6 +926,7 @@ export function apiPlugin(): Plugin {
                   quantity_ordered: Number(item.quantity_ordered),
                   cost_price_at_order: cost
                 });
+              if (ins.error) return res.status(400).json({ error: ins.error.message });
             }
           }
 
@@ -1823,52 +1825,81 @@ export function apiPlugin(): Plugin {
             .single();
           if (!po) return res.status(404).json({ error: 'PO not found' });
 
+          // Validate all receive lines first — no partial state on failure
+          const receiveLines: { plu_id: string; qty: number; poiItem: any }[] = [];
           for (const item of items) {
             const { plu_id, qty_received } = item;
-            if (!plu_id || qty_received == null) continue;
-
-            // Update quantity_received on purchase_order_items
-            const { data: existingItem } = await supabaseAdmin
+            if (!plu_id || qty_received == null || Number(qty_received) <= 0) continue;
+            const { data: poiItem } = await supabaseAdmin
               .from('purchase_order_items')
               .select('*')
               .eq('po_id', po_id)
               .eq('plu_id', plu_id)
               .single();
-            if (!existingItem) continue;
+            if (!poiItem) continue;
+            const remaining = Number(poiItem.quantity_ordered || 0) - Number(poiItem.quantity_received || 0);
+            if (Number(qty_received) > remaining + 1e-9) {
+              return res.status(400).json({ error: `Cannot receive more than ordered (${remaining} remaining for this line)` });
+            }
+            receiveLines.push({ plu_id, qty: Number(qty_received), poiItem });
+          }
 
-            const newQty = (existingItem.quantity_received || 0) + Number(qty_received);
+          let anythingReceived = false;
+          for (const line of receiveLines) {
+            const newQty = (line.poiItem.quantity_received || 0) + line.qty;
             await supabaseAdmin
               .from('purchase_order_items')
               .update({ quantity_received: newQty })
-              .eq('po_item_id', existingItem.po_item_id);
+              .eq('po_item_id', line.poiItem.po_item_id);
+            anythingReceived = true;
 
-            // Check inventory — update stock_quantity
-            const { data: invItem } = await supabaseAdmin
+            // Check inventory — canonical plu_id key, legacy name-keyed fallback
+            let { data: invItem } = await supabaseAdmin
               .from('inventory')
               .select('product_id, stock_quantity')
               .eq('store_id', po.store_id)
-              .eq('name', existingItem.plu_id)
+              .eq('plu_id', line.plu_id)
               .maybeSingle();
-
-            if (invItem) {
-              await supabaseAdmin
+            if (!invItem) {
+              // Legacy goods-in rows are keyed by plu uuid as name
+              const legacyUuid = await supabaseAdmin
                 .from('inventory')
-                .update({ stock_quantity: (invItem.stock_quantity || 0) + Number(qty_received) })
-                .eq('product_id', invItem.product_id);
-            } else {
-              // Get PLU name for inventory entry
-              const { data: _plu } = await supabaseAdmin
+                .select('product_id, stock_quantity')
+                .eq('store_id', po.store_id)
+                .eq('name', line.plu_id)
+                .maybeSingle();
+              invItem = legacyUuid?.data ?? null;
+            }
+            if (!invItem) {
+              // Legacy rows keyed by plu display name
+              const { data: pluRow } = await supabaseAdmin
                 .from('plu')
                 .select('name')
-                .eq('plu_id', plu_id)
+                .eq('plu_id', line.plu_id)
+                .single();
+              const legacyName = pluRow?.name ? await supabaseAdmin
+                .from('inventory')
+                .select('product_id, stock_quantity')
+                .eq('store_id', po.store_id)
+                .eq('name', pluRow.name)
+                .maybeSingle() : null;
+              invItem = legacyName?.data ?? null;
+            }
+            if (!invItem) {
+              // Get PLU name for inventory entry
+              const { data: pluRow } = await supabaseAdmin
+                .from('plu')
+                .select('name')
+                .eq('plu_id', line.plu_id)
                 .single();
               await supabaseAdmin
                 .from('inventory')
                 .insert({
                   store_id: po.store_id,
-                  name: plu_id, // using plu_id as name as per existing schema pattern
-                  stock_quantity: Number(qty_received),
-                  price: existingItem.cost_price_at_order,
+                  plu_id: line.plu_id,
+                  name: pluRow?.name || line.plu_id,
+                  stock_quantity: line.qty,
+                  price: line.poiItem.cost_price_at_order,
                 });
             }
           }
@@ -1884,6 +1915,8 @@ export function apiPlugin(): Plugin {
           let newStatus = 'ordered';
           if (allFullyReceived) newStatus = 'received';
           else if (anyReceived) newStatus = 'partially_received';
+
+          if (!anythingReceived) return res.json({ success: true, received_by: receiver?.user_id ?? null });
 
           try {
             await supabaseAdmin
@@ -2173,7 +2206,7 @@ export function apiPlugin(): Plugin {
 
           const saleId = transaction.transaction_id;
 
-          // Insert sale items and deduct inventory
+          // Insert sale items first — any failure aborts the whole transaction
           for (const item of items) {
             const { error: itemErr } = await supabaseAdmin.from('sale_items').insert({
               transaction_id: saleId,
@@ -2184,15 +2217,44 @@ export function apiPlugin(): Plugin {
               total_price: round2(item.quantity * item.unit_price),
             });
             if (itemErr) {
+              await supabaseAdmin.from('sales_transactions').delete().eq('transaction_id', saleId);
               console.error('Insert sale item error:', itemErr);
-              continue;
+              return res.status(400).json({ error: 'Failed to record sale line: ' + itemErr.message });
             }
-            // Deduct from inventory
-            const { data: invItem } = await supabaseAdmin.from('inventory')
+          }
+
+          // Deduct from inventory — canonical plu_id key, legacy name fallback, create row when missing
+          for (const item of items) {
+            const plu = pluMap.get(item.plu_id);
+            let { data: invItem } = await supabaseAdmin.from('inventory')
               .select('product_id, stock_quantity')
               .eq('store_id', store_id)
-              .eq('name', item.plu_name)
+              .eq('plu_id', item.plu_id)
               .maybeSingle();
+            if (!invItem) {
+              const legacyName = await supabaseAdmin.from('inventory')
+                .select('product_id, stock_quantity')
+                .eq('store_id', store_id)
+                .eq('name', item.plu_name)
+                .maybeSingle();
+              invItem = legacyName?.data ?? null;
+            }
+            if (!invItem) {
+              // Legacy goods-in rows are keyed by plu uuid as name
+              const legacyUuid = await supabaseAdmin.from('inventory')
+                .select('product_id, stock_quantity')
+                .eq('store_id', store_id)
+                .eq('name', item.plu_id)
+                .maybeSingle();
+              invItem = legacyUuid?.data ?? null;
+            }
+            if (!invItem) {
+              const created = await supabaseAdmin.from('inventory')
+                .insert({ store_id, plu_id: item.plu_id, name: plu?.name || item.plu_name, stock_quantity: 0, price: Number(plu?.headoffice_price ?? 0) })
+                .select('product_id, stock_quantity')
+                .maybeSingle();
+              invItem = created?.data ?? null;
+            }
             if (invItem) {
               const newQty = Math.max(0, (invItem.stock_quantity || 0) - item.quantity);
               await supabaseAdmin.from('inventory').update({ stock_quantity: newQty }).eq('product_id', invItem.product_id);
@@ -2280,11 +2342,27 @@ export function apiPlugin(): Plugin {
           const { data: items } = await supabaseAdmin.from('sale_items').select('*').eq('transaction_id', transaction_id);
           if (items) {
             for (const item of items) {
-              const { data: invItem } = await supabaseAdmin.from('inventory')
+              let { data: invItem } = await supabaseAdmin.from('inventory')
                 .select('product_id, stock_quantity')
                 .eq('store_id', tx.store_id)
-                .eq('name', item.plu_name)
+                .eq('plu_id', item.plu_id)
                 .maybeSingle();
+              if (!invItem) {
+                const legacyName = await supabaseAdmin.from('inventory')
+                  .select('product_id, stock_quantity')
+                  .eq('store_id', tx.store_id)
+                  .eq('name', item.plu_name)
+                  .maybeSingle();
+                invItem = legacyName?.data ?? null;
+              }
+              if (!invItem) {
+                const legacyUuid = await supabaseAdmin.from('inventory')
+                  .select('product_id, stock_quantity')
+                  .eq('store_id', tx.store_id)
+                  .eq('name', item.plu_id)
+                  .maybeSingle();
+                invItem = legacyUuid?.data ?? null;
+              }
               if (invItem) {
                 await supabaseAdmin.from('inventory').update({ stock_quantity: (invItem.stock_quantity || 0) + item.quantity }).eq('product_id', invItem.product_id);
               }

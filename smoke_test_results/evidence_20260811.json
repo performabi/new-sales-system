@@ -1,0 +1,202 @@
+{
+  "po_logbook_dev": [
+    {
+      "entity_label": "PO-2026-885975",
+      "field": "status",
+      "old_value": "",
+      "new_value": "Draft Created (Supplier: Smoke Supplier Co)",
+      "username": "system",
+      "timestamp": "2026-08-11T22:04:46.092523+00:00"
+    },
+    {
+      "entity_label": "PO-2026-885975",
+      "field": "status",
+      "old_value": "draft",
+      "new_value": "ordered (Locked & PDF Downloaded)",
+      "username": "system",
+      "timestamp": "2026-08-11T22:04:46.426301+00:00"
+    },
+    {
+      "entity_label": "PO-2026-885975",
+      "field": "received_by",
+      "old_value": "",
+      "new_value": "Smoke Test",
+      "username": "Smoke Test",
+      "timestamp": "2026-08-11T22:04:47.205977+00:00"
+    }
+  ],
+  "po_logbook_prod": [
+    {
+      "entity_label": "PO-2026-897801",
+      "field": "status",
+      "old_value": "",
+      "new_value": "Draft Created (Supplier: Smoke Supplier Co)",
+      "username": "system",
+      "timestamp": "2026-08-11T22:04:58.077214+00:00"
+    },
+    {
+      "entity_label": "PO-2026-897801",
+      "field": "status",
+      "old_value": "draft",
+      "new_value": "ordered (Locked & PDF Downloaded)",
+      "username": "system",
+      "timestamp": "2026-08-11T22:04:58.869955+00:00"
+    },
+    {
+      "entity_label": "PO-2026-897801",
+      "field": "received_by",
+      "old_value": "",
+      "new_value": "Smoke Test",
+      "username": "Smoke Test",
+      "timestamp": "2026-08-11T22:05:01.563286+00:00"
+    }
+  ],
+  "positively_pos": [
+    {
+      "po_number": "PO-2026-897801",
+      "status": "received",
+      "created_at": "2026-08-08T22:04:59.089+00:00",
+      "received_at": "2026-08-08T22:04:59.089+00:00",
+      "received_by": "bf8ecc03-af3a-488e-806d-5935fce66677",
+      "downloaded_at": "2026-08-08T22:04:59.089+00:00"
+    },
+    {
+      "po_number": "PO-2026-885975",
+      "status": "received",
+      "created_at": "2026-08-08T22:04:46.495+00:00",
+      "received_at": "2026-08-08T22:04:46.495+00:00",
+      "received_by": "bf8ecc03-af3a-488e-806d-5935fce66677",
+      "downloaded_at": "2026-08-08T22:04:46.495+00:00"
+    }
+  ],
+  "inventory": [
+    {
+      "name": "37d8ef36-dcec-43f6-b37e-dfd01298396b",
+      "stock_quantity": 12,
+      "price": 1,
+      "product_id": "2f328340-9432-4f98-bfa5-b1faa2f70949"
+    },
+    {
+      "name": "4614307c-77e8-4750-b2c6-fb7e19a6f9e7",
+      "stock_quantity": 3,
+      "price": 15,
+      "product_id": "9e6c1071-3d62-4d7b-89b2-2f2ec2dd2557"
+    }
+  ],
+  "sales": [
+    {
+      "transaction_id": "8ae33171-1b09-4c2a-be4b-3b31bdd600f0",
+      "created_at": "2026-08-11T22:04:44.330379+00:00",
+      "total_amount": 10.5,
+      "payment_method": "card",
+      "staff_user_id": "bf8ecc03-af3a-488e-806d-5935fce66677",
+      "status": "completed"
+    },
+    {
+      "transaction_id": "cee47536-90fa-4e03-a78e-08f5b6256e40",
+      "created_at": "2026-08-11T22:04:44.896325+00:00",
+      "total_amount": 13.22,
+      "payment_method": "cash",
+      "staff_user_id": "bf8ecc03-af3a-488e-806d-5935fce66677",
+      "status": "completed"
+    },
+    {
+      "transaction_id": "7e909fdf-a4eb-4691-9683-9dc9cb8f060c",
+      "created_at": "2026-08-11T22:04:45.466269+00:00",
+      "total_amount": 20.99,
+      "payment_method": "bank_transfer",
+      "staff_user_id": "bf8ecc03-af3a-488e-806d-5935fce66677",
+      "status": "completed"
+    },
+    {
+      "transaction_id": "2f0e0cb8-6ee6-4452-bb6b-fde881763baf",
+      "created_at": "2026-08-11T22:04:51.374975+00:00",
+      "total_amount": 10.5,
+      "payment_method": "card",
+      "staff_user_id": "bf8ecc03-af3a-488e-806d-5935fce66677",
+      "status": "completed"
+    },
+    {
+      "transaction_id": "f62edf4f-aa97-4b55-a858-a6f6bcc4af86",
+      "created_at": "2026-08-11T22:04:53.594292+00:00",
+      "total_amount": 13.22,
+      "payment_method": "cash",
+      "staff_user_id": "bf8ecc03-af3a-488e-806d-5935fce66677",
+      "status": "completed"
+    },
+    {
+      "transaction_id": "391fc0b9-5b19-4671-b9a1-ff7f8dcb882c",
+      "created_at": "2026-08-11T22:04:55.567035+00:00",
+      "total_amount": 20.99,
+      "payment_method": "bank_transfer",
+      "staff_user_id": "bf8ecc03-af3a-488e-806d-5935fce66677",
+      "status": "completed"
+    }
+  ],
+  "sale_items_ribeye": [
+    {
+      "transaction_id": "dd305e5b-8d94-4de7-9f7d-34ee9614ed07",
+      "quantity": 1,
+      "unit_price": 20.99,
+      "total_price": 20.99
+    },
+    {
+      "transaction_id": "8ae33171-1b09-4c2a-be4b-3b31bdd600f0",
+      "quantity": 0.5,
+      "unit_price": 20.99,
+      "total_price": 10.5
+    },
+    {
+      "transaction_id": "cee47536-90fa-4e03-a78e-08f5b6256e40",
+      "quantity": 0.63,
+      "unit_price": 20.99,
+      "total_price": 13.22
+    },
+    {
+      "transaction_id": "7e909fdf-a4eb-4691-9683-9dc9cb8f060c",
+      "quantity": 1,
+      "unit_price": 20.99,
+      "total_price": 20.99
+    },
+    {
+      "transaction_id": "2f0e0cb8-6ee6-4452-bb6b-fde881763baf",
+      "quantity": 0.5,
+      "unit_price": 20.99,
+      "total_price": 10.5
+    },
+    {
+      "transaction_id": "f62edf4f-aa97-4b55-a858-a6f6bcc4af86",
+      "quantity": 0.63,
+      "unit_price": 20.99,
+      "total_price": 13.22
+    },
+    {
+      "transaction_id": "391fc0b9-5b19-4671-b9a1-ff7f8dcb882c",
+      "quantity": 1,
+      "unit_price": 20.99,
+      "total_price": 20.99
+    }
+  ],
+  "timesheets": [
+    {
+      "user_id": "bf8ecc03-af3a-488e-806d-5935fce66677",
+      "store_id": "e17597bf-fccd-4723-8fbf-73edab4353f3",
+      "clock_in": "2026-08-11T22:04:47.875+00:00",
+      "clock_out": "2026-08-11T22:04:48.462+00:00"
+    },
+    {
+      "user_id": "bf8ecc03-af3a-488e-806d-5935fce66677",
+      "store_id": "e17597bf-fccd-4723-8fbf-73edab4353f3",
+      "clock_in": "2026-08-11T22:05:02.883+00:00",
+      "clock_out": "2026-08-11T22:05:04.97+00:00"
+    }
+  ],
+  "smoke_user": [
+    {
+      "username": "smoketest",
+      "role": "user",
+      "is_active": true,
+      "assigned_store_id": "e17597bf-fccd-4723-8fbf-73edab4353f3"
+    }
+  ]
+}

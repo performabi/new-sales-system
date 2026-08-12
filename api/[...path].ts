@@ -462,9 +462,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           totalCost += cost * Number(item.quantity_ordered);
           const { data: existingItem } = await supabaseAdmin.from('purchase_order_items').select('*').eq('po_id', po.po_id).eq('plu_id', item.plu_id).maybeSingle();
           if (existingItem) {
-            await supabaseAdmin.from('purchase_order_items').update({ quantity_ordered: existingItem.quantity_ordered + Number(item.quantity_ordered) }).eq('po_item_id', existingItem.po_item_id);
+            const upd = await supabaseAdmin.from('purchase_order_items').update({ quantity_ordered: existingItem.quantity_ordered + Number(item.quantity_ordered) }).eq('po_item_id', existingItem.po_item_id);
+            if (upd.error) return res.status(400).json({ error: upd.error.message });
           } else {
-            await supabaseAdmin.from('purchase_order_items').insert({ po_id: po.po_id, plu_id: item.plu_id, quantity_ordered: Number(item.quantity_ordered), cost_price_at_order: cost });
+            const ins = await supabaseAdmin.from('purchase_order_items').insert({ po_id: po.po_id, plu_id: item.plu_id, quantity_ordered: Number(item.quantity_ordered), cost_price_at_order: cost });
+            if (ins.error) return res.status(400).json({ error: ins.error.message });
           }
         }
         const { data: finalPo } = await supabaseAdmin.from('purchase_orders').update({ total_cost: totalCost }).eq('po_id', po.po_id).select('*, suppliers(name), stores(name), purchase_order_items(*, plu(name, plu_number))').single();
@@ -1065,19 +1067,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       const { data: po } = await supabaseAdmin.from('purchase_orders').select('store_id, po_number').eq('po_id', po_id).single();
       if (!po) return res.status(404).json({ error: 'PO not found' });
+      // Validate all receive lines first — no partial state on failure
+      const receiveLines: { plu_id: string; qty: number; poiItem: any }[] = [];
       for (const item of items) {
         const { plu_id, qty_received } = item;
-        if (!plu_id || qty_received == null) continue;
-        const { data: existingItem } = await supabaseAdmin.from('purchase_order_items').select('*').eq('po_id', po_id).eq('plu_id', plu_id).single();
-        if (!existingItem) continue;
-        const newQty = (existingItem.quantity_received || 0) + Number(qty_received);
-        await supabaseAdmin.from('purchase_order_items').update({ quantity_received: newQty }).eq('po_item_id', existingItem.po_item_id);
-        const { data: invItem } = await supabaseAdmin.from('inventory').select('product_id, stock_quantity').eq('store_id', po.store_id).eq('name', plu_id).maybeSingle();
-        if (invItem) {
-          await supabaseAdmin.from('inventory').update({ stock_quantity: (invItem.stock_quantity || 0) + Number(qty_received) }).eq('product_id', invItem.product_id);
+        if (!plu_id || qty_received == null || Number(qty_received) <= 0) continue;
+        const { data: poiItem } = await supabaseAdmin.from('purchase_order_items').select('*').eq('po_id', po_id).eq('plu_id', plu_id).single();
+        if (!poiItem) continue;
+        const remaining = Number(poiItem.quantity_ordered || 0) - Number(poiItem.quantity_received || 0);
+        if (Number(qty_received) > remaining + 1e-9) {
+          return res.status(400).json({ error: `Cannot receive more than ordered (${remaining} remaining for this line)` });
+        }
+        receiveLines.push({ plu_id, qty: Number(qty_received), poiItem });
+      }
+      let anythingReceived = false;
+      for (const line of receiveLines) {
+        const newQty = (line.poiItem.quantity_received || 0) + line.qty;
+        await supabaseAdmin.from('purchase_order_items').update({ quantity_received: newQty }).eq('po_item_id', line.poiItem.po_item_id);
+        anythingReceived = true;
+        // Check inventory — canonical plu_id key, legacy name-keyed fallback
+        let invItem: any = null;
+        const byPlu = await supabaseAdmin.from('inventory').select('product_id, stock_quantity').eq('store_id', po.store_id).eq('plu_id', line.plu_id).maybeSingle();
+        if (byPlu.data) {
+          invItem = byPlu.data;
         } else {
-          const { data: _plu } = await supabaseAdmin.from('plu').select('name').eq('plu_id', plu_id).single();
-          await supabaseAdmin.from('inventory').insert({ store_id: po.store_id, name: plu_id, stock_quantity: Number(qty_received), price: existingItem.cost_price_at_order });
+          const legacy = await supabaseAdmin.from('inventory').select('product_id, stock_quantity').eq('store_id', po.store_id).eq('name', line.plu_id).maybeSingle();
+          invItem = legacy?.data ?? null;
+        }
+        if (invItem) {
+          await supabaseAdmin.from('inventory').update({ stock_quantity: (invItem.stock_quantity || 0) + line.qty }).eq('product_id', invItem.product_id);
+        } else {
+          const { data: pluRow } = await supabaseAdmin.from('plu').select('name').eq('plu_id', line.plu_id).single();
+          const legacyName = pluRow?.name ? await supabaseAdmin.from('inventory').select('product_id, stock_quantity').eq('store_id', po.store_id).eq('name', pluRow.name).maybeSingle() : null;
+          if (legacyName?.data) {
+            await supabaseAdmin.from('inventory').update({ stock_quantity: (legacyName.data.stock_quantity || 0) + line.qty }).eq('product_id', legacyName.data.product_id);
+          } else {
+            await supabaseAdmin.from('inventory').insert({ store_id: po.store_id, plu_id: line.plu_id, name: pluRow?.name || line.plu_id, stock_quantity: line.qty, price: line.poiItem.cost_price_at_order });
+          }
         }
       }
       const { data: allItems } = await supabaseAdmin.from('purchase_order_items').select('quantity_ordered, quantity_received').eq('po_id', po_id);
@@ -1086,6 +1112,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let newStatus = 'ordered';
       if (allFullyReceived) newStatus = 'received';
       else if (anyReceived) newStatus = 'partially_received';
+      if (!anythingReceived) return res.json({ success: true, status: newStatus, ...(receiver ? { received_by: receiver.user_id } : {}) });
       const poUpdate: Record<string, unknown> = { status: newStatus, received_at: new Date().toISOString() };
       if (receiver) poUpdate.received_by = receiver.user_id;
       try {
@@ -1281,17 +1308,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }).select().single();
       if (txErr) return res.status(400).json({ error: txErr.message });
       const saleId = transaction.transaction_id;
+      // Insert sale items first — any failure aborts the whole transaction
       for (const item of items) {
         const { error: itemErr } = await supabaseAdmin.from('sale_items').insert({
           transaction_id: saleId, plu_id: item.plu_id, plu_name: item.plu_name, quantity: item.quantity,
           unit_price: item.unit_price, total_price: round2(item.quantity * item.unit_price),
         });
         if (itemErr) {
+          await supabaseAdmin.from('sales_transactions').delete().eq('transaction_id', saleId);
           console.error('Insert sale item error:', itemErr);
-          continue;
+          return res.status(400).json({ error: 'Failed to record sale line: ' + itemErr.message });
         }
-        const { data: invItem } = await supabaseAdmin.from('inventory')
-          .select('product_id, stock_quantity').eq('store_id', store_id).eq('name', item.plu_name).maybeSingle();
+      }
+      // Deduct from inventory — canonical plu_id key, legacy name fallback, create row when missing
+      for (const item of items) {
+        const plu = pluMap.get(item.plu_id);
+        let invItem: any = null;
+        const byPlu = await supabaseAdmin.from('inventory')
+          .select('product_id, stock_quantity').eq('store_id', store_id).eq('plu_id', item.plu_id).maybeSingle();
+        if (byPlu.data) {
+          invItem = byPlu.data;
+        } else {
+          const legacy = await supabaseAdmin.from('inventory')
+            .select('product_id, stock_quantity').eq('store_id', store_id).eq('name', item.plu_name).maybeSingle();
+          invItem = legacy?.data ?? null;
+        }
+        if (!invItem) {
+          const legacyUuid = await supabaseAdmin.from('inventory')
+            .select('product_id, stock_quantity').eq('store_id', store_id).eq('name', item.plu_id).maybeSingle();
+          invItem = legacyUuid?.data ?? null;
+        }
+        if (!invItem) {
+          const created = await supabaseAdmin.from('inventory')
+            .insert({ store_id, plu_id: item.plu_id, name: plu?.name || item.plu_name, stock_quantity: 0, price: Number(plu?.headoffice_price ?? 0) })
+            .select('product_id, stock_quantity')
+            .maybeSingle();
+          invItem = created?.data ?? null;
+        }
         if (invItem) {
           const newQty = Math.max(0, (invItem.stock_quantity || 0) - item.quantity);
           await supabaseAdmin.from('inventory').update({ stock_quantity: newQty }).eq('product_id', invItem.product_id);
@@ -1352,8 +1405,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const { data: items } = await supabaseAdmin.from('sale_items').select('*').eq('transaction_id', transaction_id);
       if (items) {
         for (const item of items) {
-          const { data: invItem } = await supabaseAdmin.from('inventory')
-            .select('product_id, stock_quantity').eq('store_id', tx.store_id).eq('name', item.plu_name).maybeSingle();
+          let invItem: any = null;
+          const byPlu = await supabaseAdmin.from('inventory')
+            .select('product_id, stock_quantity').eq('store_id', tx.store_id).eq('plu_id', item.plu_id).maybeSingle();
+          if (byPlu.data) {
+            invItem = byPlu.data;
+          } else {
+            const legacy = await supabaseAdmin.from('inventory')
+              .select('product_id, stock_quantity').eq('store_id', tx.store_id).eq('name', item.plu_name).maybeSingle();
+            invItem = legacy?.data ?? null;
+          }
+          if (!invItem) {
+            const legacyUuid = await supabaseAdmin.from('inventory')
+              .select('product_id, stock_quantity').eq('store_id', tx.store_id).eq('name', item.plu_id).maybeSingle();
+            invItem = legacyUuid?.data ?? null;
+          }
           if (invItem) {
             await supabaseAdmin.from('inventory').update({ stock_quantity: (invItem.stock_quantity || 0) + item.quantity }).eq('product_id', invItem.product_id);
           }

@@ -66,10 +66,20 @@ export interface InventoryItem {
   product_id: string;
   store_id: string;
   name: string;
+  plu_id?: string | null;
+  plu?: {
+    plu_id: string;
+    plu_number: string;
+    name: string;
+    plu_categories?: { name: string } | null;
+  } | null;
   barcode_qr: string | null;
   stock_quantity: number;
   price: number;
   store_name?: string;
+  product_name?: string;
+  plu_number?: string;
+  category_name?: string;
 }
 
 export type ToastType = 'success' | 'error' | 'info';
@@ -141,6 +151,7 @@ export interface PurchaseOrder {
   created_at: string;
   downloaded_at?: string;
   received_at?: string;
+  received_by?: string | null;
   expected_delivery_date?: string | null;
   suppliers?: {
     name: string;

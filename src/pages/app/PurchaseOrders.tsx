@@ -11,7 +11,7 @@ export default function PurchaseOrders() {
   const {
     purchaseOrders, purchaseOrdersLoading, fetchPurchaseOrders,
     lockPurchaseOrder, fetchSuppliers, suppliers,
-    stores, fetchStores,
+    stores, fetchStores, users, fetchUsers,
     poSuggestions, poSuggestionsLoading, fetchPoSuggestions, clearSuggestions,
     savePoDraft,
   } = useAppStore();
@@ -20,12 +20,17 @@ export default function PurchaseOrders() {
   const [selectedStoreId, setSelectedStoreId] = useState('');
   const [editingQty, setEditingQty] = useState<Record<string, number>>({});
   const [creating, setCreating] = useState(false);
+  const [storeFilter, setStoreFilter] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [supplierFilter, setSupplierFilter] = useState('');
 
   useEffect(() => {
     fetchPurchaseOrders();
     fetchSuppliers();
     fetchStores();
-  }, [fetchPurchaseOrders, fetchSuppliers, fetchStores]);
+    fetchUsers();
+  }, [fetchPurchaseOrders, fetchSuppliers, fetchStores, fetchUsers]);
 
   useEffect(() => {
     // Reset editing quantities when suggestions change
@@ -179,26 +184,55 @@ export default function PurchaseOrders() {
 
   const columns = [
     { key: 'po_number', label: 'PO Number' },
+    { key: 'store_name_po', label: 'Store' },
     { key: 'supplier_name', label: 'Supplier' },
+    { key: 'created_date', label: 'Creation Date' },
+    { key: 'created_by_name', label: 'Created By' },
+    { key: 'items_total', label: 'Items' },
+    { key: 'items_lines', label: 'Lines' },
     { key: 'status', label: 'Status' },
+    { key: 'received_date', label: 'Goods-In Date' },
+    { key: 'received_by_name', label: 'Goods-In User' },
     { key: 'total_cost', label: 'Total Cost' },
     { key: 'actions', label: 'Actions' },
   ];
 
-  const tableData = purchaseOrders.map((po) => ({
-    ...po,
-    supplier_name: po.suppliers?.name || 'Unknown',
-    status: <span className={`badge badge-${po.status === 'draft' ? 'warning' : 'success'}`}>{po.status.toUpperCase()}</span>,
-    total_cost: formatCurrency(po.total_cost),
-    actions: (
-      <div style={{ display: 'flex', gap: '8px' }}>
-        <button className="btn btn-secondary btn-sm" onClick={() => handlePrint(po)}>🖨️ PDF / Print</button>
-        {po.status === 'draft' && (
-          <button className="btn btn-primary btn-sm" onClick={() => handleLock(po.po_id)}>🔒 Finalize & Lock</button>
-        )}
-      </div>
-    ),
-  }));
+  const userName = (id: string | null | undefined) => users.find((u) => u.user_id === id)?.full_name ?? '—';
+
+  const filteredPo = purchaseOrders.filter((po) => {
+    if (storeFilter && po.store_id !== storeFilter) return false;
+    const createdAt = new Date(po.created_at).getTime();
+    if (dateFrom && createdAt < new Date(`${dateFrom}T00:00:00`).getTime()) return false;
+    if (dateTo && createdAt > new Date(`${dateTo}T23:59:59`).getTime()) return false;
+    if (supplierFilter.trim() && !(po.suppliers?.name ?? '').toLowerCase().includes(supplierFilter.trim().toLowerCase())) return false;
+    return true;
+  });
+
+  const tableData = filteredPo.map((po) => {
+    const items = po.purchase_order_items ?? [];
+    const itemsTotal = items.reduce((sum, i) => sum + Number(i.quantity_ordered || 0), 0);
+    return {
+      ...po,
+      store_name_po: po.stores?.name || '—',
+      supplier_name: po.suppliers?.name || 'Unknown',
+      created_date: new Date(po.created_at).toLocaleDateString(),
+      created_by_name: userName(po.created_by),
+      items_total: itemsTotal,
+      items_lines: items.length,
+      received_date: po.received_at ? new Date(po.received_at).toLocaleDateString() : '—',
+      received_by_name: userName(po.received_by),
+      status: <span className={`badge badge-${po.status === 'draft' ? 'warning' : 'success'}`}>{po.status.toUpperCase()}</span>,
+      total_cost: formatCurrency(po.total_cost),
+      actions: (
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button className="btn btn-secondary btn-sm" onClick={() => handlePrint(po)}>🖨️ PDF / Print</button>
+          {po.status === 'draft' && (
+            <button className="btn btn-primary btn-sm" onClick={() => handleLock(po.po_id)}>🔒 Finalize & Lock</button>
+          )}
+        </div>
+      ),
+    };
+  });
 
   const totalSuggestedCost = poSuggestions.reduce((sum, s) => sum + s.total_suggested_cost, 0);
 
@@ -307,6 +341,39 @@ export default function PurchaseOrders() {
       </div>
 
       {/* Existing PO List */}
+      <div className="filter-bar" style={{ marginBottom: '20px' }}>
+        <div className="filter-group" style={{ minWidth: '200px' }}>
+          <label className="filter-label">Store</label>
+          <select className="form-select" value={storeFilter} onChange={(e) => setStoreFilter(e.target.value)}>
+            <option value="">All Stores</option>
+            {stores.map((s) => (
+              <option key={s.store_id} value={s.store_id}>{s.name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="filter-group" style={{ minWidth: '160px' }}>
+          <label className="filter-label">From</label>
+          <input type="date" className="form-input" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+        </div>
+        <div className="filter-group" style={{ minWidth: '160px' }}>
+          <label className="filter-label">To</label>
+          <input type="date" className="form-input" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+        </div>
+        <div className="filter-group" style={{ minWidth: '220px' }}>
+          <label className="filter-label">Supplier (contains)</label>
+          <input
+            type="text"
+            className="form-input"
+            placeholder="Type to filter supplier…"
+            value={supplierFilter}
+            onChange={(e) => setSupplierFilter(e.target.value)}
+          />
+        </div>
+        <div style={{ alignSelf: 'flex-end', paddingBottom: '4px' }}>
+          <span style={{ color: 'var(--text-muted)', fontSize: '0.88rem' }}>{tableData.length} order{tableData.length !== 1 ? 's' : ''}</span>
+        </div>
+      </div>
+
       {purchaseOrdersLoading ? (
         <div className="loading-spinner"><div className="spinner"></div></div>
       ) : (
