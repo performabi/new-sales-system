@@ -80,6 +80,7 @@ export default function PosEntry() {
       if (data.kind === 'admin') {
         if (data.tenant_schema) {
           setAdminSchema(data.tenant_schema);
+          setSelectedTenant({ tenant_id: data.tenant_schema, name: data.tenant_name || data.user?.full_name || 'Your tenant', slug: '' });
           fetchStoresForSchema(data.tenant_schema);
         } else {
           setAdminSchema(null);

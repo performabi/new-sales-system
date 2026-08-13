@@ -1137,9 +1137,10 @@ export function apiPlugin(): Plugin {
           }
 
           // ---- Standard-user path: scan active tenants for a matching user PIN ----
-          const { data: tenants } = await supabasePublic.from('tenants').select('schema_name').eq('is_active', true);
+          const { data: tenants } = await supabasePublic.from('tenants').select('schema_name, name').eq('is_active', true);
           for (const tenant of tenants || []) {
             const schema = tenant.schema_name;
+            const tenantName = tenant.name;
             const tenantAdmin = getSupabaseAdmin(server, schema);
             const { data: users } = await tenantAdmin
               .from('users')
@@ -1172,6 +1173,7 @@ export function apiPlugin(): Plugin {
               return res.json({
                 kind: 'admin',
                 tenant_schema: schema,
+                tenant_name: tenantName,
                 pending_token: pendingToken,
                 user: { user_id: user.user_id, full_name: user.full_name, role: 'admin' },
               });
