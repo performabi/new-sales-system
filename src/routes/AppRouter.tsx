@@ -33,6 +33,7 @@ import PurchaseOrderCreate from '../pages/app/PurchaseOrderCreate';
 import StoreChecklists from '../pages/app/StoreChecklists';
 import CurrencyConfig from '../pages/app/CurrencyConfig';
 import CashbackConfig from '../pages/app/CashbackConfig';
+import DeviceSettings from '../pages/app/DeviceSettings';
 import LoyaltyCards from '../pages/app/LoyaltyCards';
 import LoyaltyNotifications from '../pages/app/LoyaltyNotifications';
 import Sales from '../pages/app/Sales';
@@ -271,6 +272,7 @@ export default function AppRouter() {
           <Route path="setup/store-checklists" element={<StoreChecklists />} />
           <Route path="setup/currency-config" element={<CurrencyConfig />} />
           <Route path="setup/cashback-config" element={<CashbackConfig />} />
+          <Route path="setup/devices" element={<DeviceSettings />} />
           <Route path="loyalty-cards" element={<LoyaltyCards />} />
           <Route path="loyalty-notifications" element={<LoyaltyNotifications />} />
           <Route path="*" element={<AppCatchAll />} />

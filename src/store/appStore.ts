@@ -1,6 +1,6 @@
 // src/store/appStore.ts
 import { create } from 'zustand';
-import type { Store, UserProfile, InventoryItem, Toast, PluCategory, Plu, Supplier, PurchaseOrder, ItemSizing, SupplierProductWithPlu, SuggestedPO, LoyaltyCard, CurrencyConfig, LoyaltyNotification } from '../types';
+import type { Store, UserProfile, InventoryItem, Toast, PluCategory, Plu, Supplier, PurchaseOrder, ItemSizing, SupplierProductWithPlu, SuggestedPO, LoyaltyCard, CurrencyConfig, LoyaltyNotification, DeviceConfig } from '../types';
 import { getSupabaseClient } from '../lib/supabaseClient';
 import { useAuthStore } from './authStore';
 
@@ -167,6 +167,12 @@ interface AppState {
   currencyConfig: CurrencyConfig | null;
   fetchCurrencyConfig: () => Promise<void>;
   updateCurrencyConfig: (config: CurrencyConfig) => Promise<void>;
+
+  // Device Config (per store)
+  deviceConfig: DeviceConfig | null;
+  deviceConfigStoreId: string | null;
+  fetchDeviceConfig: (storeId: string) => Promise<void>;
+  updateDeviceConfig: (storeId: string, config: DeviceConfig) => Promise<{ success?: boolean; error?: string }>;
 
   // Loyalty Cards
   loyaltyCards: LoyaltyCard[];
@@ -1478,6 +1484,38 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().addToast('success', 'Currency settings saved');
     } catch (err) {
       console.error('updateCurrencyConfig error:', err);
+    }
+  },
+
+  // ---------- Device Config (per store) ----------
+  deviceConfig: null,
+  deviceConfigStoreId: null,
+
+  fetchDeviceConfig: async (storeId: string) => {
+    try {
+      const res = await apiFetch(`/api/settings/devices?store_id=${encodeURIComponent(storeId)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      set({ deviceConfig: data, deviceConfigStoreId: storeId });
+    } catch (err) {
+      console.error('fetchDeviceConfig error:', err);
+    }
+  },
+
+  updateDeviceConfig: async (storeId: string, config: DeviceConfig) => {
+    try {
+      const res = await apiFetch('/api/settings/devices', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ store_id: storeId, config }),
+      });
+      if (!res.ok) return { error: 'Failed to save device settings' };
+      set({ deviceConfig: config, deviceConfigStoreId: storeId });
+      get().addToast('success', 'Device settings saved');
+      return { success: true };
+    } catch (err) {
+      console.error('updateDeviceConfig error:', err);
+      return { error: (err as Error).message };
     }
   },
 

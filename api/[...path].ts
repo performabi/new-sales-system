@@ -1188,6 +1188,26 @@ return res.json({ success: true, status: newStatus, delivered_date: effectiveDel
       return res.json({ success: true });
     }
 
+    // Settings: get per-store device config
+    if (path[0] === 'settings' && path[1] === 'devices' && method === 'GET') {
+      const storeId = String((req.query as any).store_id || '');
+      if (!storeId) return res.status(400).json({ error: 'store_id required' });
+      const { data } = await supabaseAdmin.from('system_settings').select('value').eq('key', `devices_${storeId}`).maybeSingle();
+      return res.json(data?.value || {});
+    }
+
+    // Settings: update per-store device config
+    if (path[0] === 'settings' && path[1] === 'devices' && method === 'PUT') {
+      const { store_id, config } = body || {};
+      if (!store_id || !config) return res.status(400).json({ error: 'store_id and config required' });
+      const { error } = await supabaseAdmin.from('system_settings').upsert(
+        { key: `devices_${store_id}`, value: config, updated_at: new Date().toISOString() },
+        { onConflict: 'key' },
+      );
+      if (error) return res.status(400).json({ error: error.message });
+      return res.json({ success: true });
+    }
+
     // Loyalty Cards: list
     if (path[0] === 'loyalty-cards' && method === 'GET' && !path[1]) {
       const { data, error } = await supabaseAdmin.from('loyalty_cards').select('*').order('customer_name');

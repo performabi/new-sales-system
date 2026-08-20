@@ -1,3 +1,47 @@
+export interface ScaleConfig {
+  enabled: boolean;
+  protocol: 'ascii' | 'bare' | 'custom';
+  customRegex?: string;
+  baud: number;
+}
+
+export interface PrinterConfig {
+  enabled: boolean;
+  transport: 'usb' | 'serial';
+  vendorId?: number;
+  productId?: number;
+  model: string;
+  baud?: number;
+}
+
+export interface DrawerConfig {
+  enabled: boolean;
+  mode: 'chained' | 'standalone';
+  port?: string;
+  baud?: number;
+}
+
+export interface DeviceConfig {
+  scale: ScaleConfig;
+  printer: PrinterConfig;
+  drawer: DrawerConfig;
+}
+
+export const DEFAULT_DEVICE_CONFIG: DeviceConfig = {
+  scale: { enabled: false, protocol: 'ascii', baud: 9600 },
+  printer: { enabled: false, transport: 'usb', model: '' },
+  drawer: { enabled: false, mode: 'chained' },
+};
+
+export function normalizeDeviceConfig(raw: Partial<DeviceConfig> | null | undefined): DeviceConfig {
+  const r = raw ?? {};
+  return {
+    scale: { ...DEFAULT_DEVICE_CONFIG.scale, ...(r.scale ?? {}) },
+    printer: { ...DEFAULT_DEVICE_CONFIG.printer, ...(r.printer ?? {}) },
+    drawer: { ...DEFAULT_DEVICE_CONFIG.drawer, ...(r.drawer ?? {}) },
+  };
+}
+
 export interface WeightReading {
   weight: number;
   unit: 'kg' | 'g';

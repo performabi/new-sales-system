@@ -63,6 +63,7 @@ const SECTIONS: Section[] = [
       { path: '/app/setup/store-checklists', icon: '✅', label: 'Checklists' },
       { path: '/app/setup/currency-config', icon: '💷', label: 'Currency' },
       { path: '/app/setup/cashback-config', icon: '💰', label: 'Cashback' },
+      { path: '/app/setup/devices', icon: '🖨️', label: 'Devices' },
     ],
   },
   {

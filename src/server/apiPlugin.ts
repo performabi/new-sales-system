@@ -2027,6 +2027,38 @@ export function apiPlugin(): Plugin {
         }
       });
 
+      // ---- Settings: get per-store device config ----
+      app.get('/api/settings/devices', async (req, res) => {
+        try {
+          const supabaseAdmin = getSupabaseAdmin(server);
+          const storeId = String(req.query.store_id || '');
+          if (!storeId) return res.status(400).json({ error: 'store_id required' });
+          const { data } = await supabaseAdmin.from('system_settings').select('value').eq('key', `devices_${storeId}`).maybeSingle();
+          return res.json(data?.value || {});
+        } catch (err) {
+          console.error('Get device settings error:', err);
+          return res.status(500).json({ error: 'Internal server error' });
+        }
+      });
+
+      // ---- Settings: update per-store device config ----
+      app.put('/api/settings/devices', async (req, res) => {
+        try {
+          const supabaseAdmin = getSupabaseAdmin(server);
+          const { store_id, config } = req.body || {};
+          if (!store_id || !config) return res.status(400).json({ error: 'store_id and config required' });
+          const { error } = await supabaseAdmin.from('system_settings').upsert(
+            { key: `devices_${store_id}`, value: config, updated_at: new Date().toISOString() },
+            { onConflict: 'key' },
+          );
+          if (error) return res.status(400).json({ error: error.message });
+          return res.json({ success: true });
+        } catch (err) {
+          console.error('Update device settings error:', err);
+          return res.status(500).json({ error: 'Internal server error' });
+        }
+      });
+
       // ---- Loyalty Cards: list / search ----
       app.get('/api/loyalty-cards', async (_req, res) => {
         try {

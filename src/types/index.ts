@@ -258,6 +258,8 @@ export interface CurrencyConfig {
   coins: number[];
 }
 
+export type { DeviceConfig, ScaleConfig, PrinterConfig, DrawerConfig } from '../devices/interfaces';
+
 export interface LoyaltyNotification {
   notification_id: string;
   title: string;

@@ -1,0 +1,198 @@
+================================================================================
+2026-08-21 IMPLEMENTATION PLAN — POS Hardware Peripherals
+================================================================================
+
+Status legend: [ ] = not started   [~] = in progress   [x] = done   [!] = blocked
+
+Scope (this round): device framework + settings UI + SCALE driver + RECEIPT
+PRINTER & CASH DRAWER (configurable ESC/POS).
+Deferred to follow-up (documented below, NOT in this round):
+  - Dojo card payments
+  - Camera QR scanner enhancement for loyalty
+
+Architecture: browser-native Web Serial / Web USB on Chromium desktop
+(Chrome/Edge). Extend the existing src/devices/ abstraction with real drivers
+behind the current interfaces; keep the simulators as the offline fallback.
+Per-store device config is persisted server-side; per-terminal port selection
+is stored locally (Web Serial/USB permission model).
+
+Current peripheral state (audited 2026-08-20):
+  - Scale:  IScale + ScaleSimulator (random kg) wired into WeightModal /
+            WeightMonitor / Till. NO real driver.
+  - Scanner: keyboard-wedge in ScanInput.tsx -> /api/plu/ean. ALREADY WORKS
+            (HID wedge); loyalty 'loyalty:' prefix handled server-side.
+  - Receipt printer: IReceiptPrinter + ReceiptLine defined but unused;
+            Till.handlePrint uses window.print() 80mm CSS only.
+  - Card terminal (Dojo): ICardTerminal defined but unused; PaymentModal
+            confirms instantly. Zero Dojo integration anywhere.
+  - Cash drawer: ICashDrawer defined but unused; never opened. Backend
+            cash_given/change_due already persisted (migration 010).
+
+===============================================================================
+PHASE P0 — Device framework + settings foundation (low risk, unblocks all)
+===============================================================================
+
+[x] P0.1 DeviceManager refactor (src/devices/DeviceManager.ts):
+       - register real drivers + simulators
+       - feature-detect navigator.serial / navigator.usb
+       - getScale() / getPrinter() / getDrawer() return the ACTIVE driver
+         (real when connected, else simulator)
+       - connect-status pub/sub + a useDevices() hook so WeightModal/Till/
+         PaymentModal/WeightMonitor consume the same driver instance
+
+[x] P0.2 Device config storage — REUSE system_settings, ZERO migration
+       (decision 2026-08-21, user-approved):
+       - per-store config persisted as a JSONB value under key
+         `devices_<store_id>` in the existing per-tenant system_settings table
+       - NO migration 012 needed; NO provision_tenant() change needed
+       - config keys: printer { transport: 'usb'|'serial', vendor_id,
+         product_id, model }, scale { protocol preset, baud },
+         drawer { mode: 'chained'|'standalone', port }
+
+[x] P0.3 Server route (BOTH copies: apiPlugin.ts + api/[...path].ts):
+       - GET  /api/settings/devices?store_id=  -> config JSON (or defaults)
+       - PUT  /api/settings/devices           -> upsert under devices_<store_id>
+       - parity rule: identical logic in both server copies
+
+[x] P0.4 Settings UI (src/pages/app/DeviceSettings.tsx, routed under
+       /app/:slug/setup/devices, sidebar entry "Devices" under Setup):
+       - status cards: scale / printer / drawer (connected?)
+       - scale protocol + baud selectors, custom regex field
+       - printer transport / model / USB VID / PID fields
+       - drawer mode chained|standalone + port field
+       - scale debug readout (raw stream + parsed kg + stable flag)
+       - store selector (config is per-store)
+
+[x] P0.5 GATE:
+       - device-settings round-trips through API (PUT then GET) — verified
+         live on dev :5174, deep-compare PASS, test row cleaned up
+       - simulator-mode wiring intact (dev/test never breaks without hardware)
+       - npx tsc -b + npm run build green
+
+===============================================================================
+PHASE P1 — Scale (Web Serial)
+===============================================================================
+
+[x] P1.1 ScaleSerialDriver (src/devices/ScaleSerialDriver.ts) implements IScale:
+       - navigator.serial connect (default 9600 8N1)
+       - configurable stream parser with presets:
+           * continuous ASCII, e.g. ST,GS,+ 0.000kg (Mettler/Sartorius-style)
+           * bare float, e.g. " 0.123"
+           * custom regex (capture group 1 = weight)
+       - stable-flag detection (N consecutive equal reads)
+       - unit detect kg/g; readWeight() returns cached latest
+       - disconnect/unsubscribe lifecycle
+       - note: erasyableSyntaxOnly forbids ctor param props -> explicit field
+
+[x] P1.2 Wire UI: WeightModal / WeightMonitor / Till consume
+       deviceManager.getScale() (driver when connected, simulator fallback);
+       DeviceManager.applyConfig(config) swaps in ScaleSerialDriver when
+       scale.enabled + Web Serial supported; Till loads device config on boot
+
+[x] P1.3 Scale debug view in DeviceSettings (raw stream + parsed value) to
+       calibrate protocol presets on real hardware
+
+[!] P1.4 GATE (BLOCKED on physical scale hardware):
+       - manual hardware checklist: connect -> stable read -> kg flows into
+         basket quantity -> price = kg * pricePerKg
+       - ASK USER: scale make/model + output format -> pin protocol preset
+       - code + build verified (tsc + vite build green)
+
+===============================================================================
+PHASE P2 — Receipt printer + cash drawer (configurable ESC/POS)
+===============================================================================
+
+[x] P2.1 src/devices/escpos.ts byte builder:
+       - init 0x1B 0x40, bold, double-size, alignment, line layout
+       - cut 0x1D 0x56
+       - drawer kick 0x1B 0x70 0x00 0x19 0xFA
+       - buildReceiptLines(tx, storeName, symbol, fmtDate, fmtTime) mirrors
+         ReceiptModal layout (items, discount, TOTAL, PAID BY, CASH GIVEN/CHANGE)
+       - QR command block for loyalty: deferred (see Deferred — no QR builder yet)
+
+[x] P2.2 ReceiptPrinterDriver (src/devices/ReceiptPrinterDriver.ts) implements
+       IReceiptPrinter:
+       - transport Web USB (ESC/POS USB printers, configurable vendor/product)
+       - transport Web Serial (RS-232 thermal printers)
+       - NOTE: network (TCP 9100) printers are NOT reachable from a browser;
+         flagged for a future companion bridge service (see Deferred)
+       - write() copies payload to fresh ArrayBuffer (TS BufferSource typing)
+
+[x] P2.3 CashDrawerDriver (src/devices/CashDrawerDriver.ts) implements
+       ICashDrawer:
+       - chained  -> drawer kick sent through the printer transport
+         (attachPrinter(); DeviceManager.applyConfig links chained drawer)
+       - standalone -> Web Serial drawer port
+
+[x] P2.4 Wire UI:
+       - Till.handlePrint -> printer driver when connected (buildReceiptLines),
+         else fallback to current window.print() 80mm CSS path
+       - drawer OPENS AUTOMATICALLY after a successful CASH sale in
+         Till.handlePay (deviceManager.getDrawer().open())
+       - DeviceManager.applyConfig registers ScaleSerialDriver / printer /
+         drawer from per-store config; Till loads device config on boot
+       - ReceiptModal loyalty QR block: deferred (see Deferred)
+
+[!] P2.5 GATE (BLOCKED on physical printer/drawer hardware):
+       - manual hardware checklist: print + cut, drawer kick on cash,
+         browser-print fallback still works
+       - ASK USER: printer make/model + transport (USB / RS-232 / network)
+         -> set config
+       - code verified: escpos byte builder checked in Node (10/10),
+         tsc + vite build green
+
+===============================================================================
+PHASE P3 — Regression + docs
+===============================================================================
+
+[x] P3.1 Automated regression (st-peripherals-smoke.mjs):
+       - receipt lines build from persisted tx (CASH GIVEN / CHANGE)
+       - escpos byte sequences (init/cut/kick) — 10/10 in Node
+       - config normalization (defaults + partial merge) — 15/15 total
+       - tsc + build green
+       - NOTE: drawer-open / scale-weight DOM wiring is browser-only;
+         covered by manual hardware checklists (P1.4 / P2.5)
+[!] P3.2 Manual hardware checklist per device (scale / printer / drawer):
+       - BLOCKED on physical hardware — evidence to be recorded once devices
+         are on-site (connect -> stable read / print+cut / drawer kick on cash)
+[x] P3.3 Close-out: plan updated; server route changed (GET/PUT
+       /api/settings/devices) in BOTH copies -> deploy parity required when
+       committing/pushing to main (Vercel auto-deploy)
+
+===============================================================================
+DEFERRED FOLLOW-UP (documented, NOT in this round)
+===============================================================================
+
+- Dojo card payments:
+    * server proxy POST /api/payments/dojo/* (merchant keys server-side in
+      env, never in the browser)
+    * PaymentModal card/contactless -> terminal.processPayment(total) ->
+      wait for approval -> send payment_reference with createSale
+    * migration 013: add payment_reference / payment_status to
+      sales_transactions (both server copies persist + expose)
+- Scanner camera QR (BarcodeDetector / getUserMedia) for loyalty card QR;
+  keyboard-wedge scanning already works today and needs no change.
+
+===============================================================================
+OPEN QUESTIONS (resolve as each device phase starts)
+===============================================================================
+1. Scale make/model + output format (P1) -> protocol preset + baud
+2. Printer make/model + transport USB / RS-232 / network (P2)
+3. Dojo merchant API credentials + terminal trigger model (deferred round)
+
+===============================================================================
+CONTEXT / EVIDENCE (from audit 2026-08-20)
+===============================================================================
+- src/devices/: interfaces.ts (all 5 contracts), DeviceManager.ts singleton,
+  ScaleSimulator.ts (used), BarcodeScannerSimulator.ts (unused),
+  CardTerminalSimulator.ts (unused), CashDrawerSimulator.ts (unused),
+  ReceiptPrinterSimulator.ts (unused), index.ts barrel.
+- No serial/usb/WebSocket/Electron/Tauri/PWA anywhere; pure browser app
+  (React 19 + Vite 8 + Vercel serverless).
+- No device settings UI; system_settings table already used for currency /
+  cashback config (per-tenant key/value) - device config needs the new
+  per-store device_settings table (P0.2).
+- Backend cash accounting already complete (migration 010, D7) - P2 only
+  adds the physical drawer-kick.
+
+(End of file)

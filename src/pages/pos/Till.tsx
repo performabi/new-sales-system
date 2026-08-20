@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { useAppStore } from '../../store/appStore';
 import { apiFetch } from '../../lib/api';
 import { deviceManager } from '../../devices/DeviceManager';
+import { buildReceiptLines } from '../../devices/escpos';
 import CategoryBar from '../../components/Pos/CategoryBar';
 import PluGrid from '../../components/Pos/PluGrid';
 import ScanInput from '../../components/Pos/ScanInput';
@@ -68,6 +69,12 @@ export default function Till() {
       .then((r) => r.json())
       .then((c) => setCurrencyConfig(c))
       .catch(() => {});
+    if (storeId) {
+      apiFetch(`/api/settings/devices?store_id=${encodeURIComponent(storeId)}`)
+        .then((r) => r.ok ? r.json() : null)
+        .then((cfg) => { if (cfg) deviceManager.applyConfig(cfg); })
+        .catch(() => {});
+    }
     deviceManager.getScale().connect().catch(() => {});
   }, [storeId]);
 
@@ -192,9 +199,24 @@ export default function Till() {
     setLastTransaction(result.transaction);
     setShowReceipt(true);
     useAppStore.getState().closeBasket(activeTabId!);
+
+    if (method === 'cash') {
+      deviceManager.getDrawer().open().catch(() => {});
+    }
   };
 
   const handlePrint = () => {
+    const tx = lastTransaction;
+    const printer = deviceManager.getPrinter();
+    if (printer.getStatus && printer.getStatus() !== 'offline' && printer.getStatus() !== 'error' && tx) {
+      const lines = buildReceiptLines(
+        tx, storeName, currencyConfig?.symbol || '£',
+        (d: Date) => d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }),
+        (d: Date) => d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+      );
+      printer.print(lines).catch(() => {});
+      return;
+    }
     const receiptEl = document.getElementById('receipt-content');
     if (!receiptEl) return;
     const printWin = window.open('', '_blank');
