@@ -10,6 +10,7 @@ import {
   verifyPin,
   signPosToken,
   isPosLoginThrottled,
+  pinThrottleKey,
   recordPosAttempt,
   requestIp,
   type Identity,
@@ -443,14 +444,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.json(data);
       }
       if (path[1] === 'save-draft' && method === 'POST') {
-        const { supplier_id, store_id, items, created_by } = body;
+        const { supplier_id, store_id, items, created_by, expected_delivery_date } = body;
+        if (expected_delivery_date != null && expected_delivery_date !== '') {
+          const parsed = new Date(`${expected_delivery_date}T00:00:00Z`);
+          if (Number.isNaN(parsed.getTime())) return res.status(400).json({ error: 'expected_delivery_date must be a valid date (YYYY-MM-DD)' });
+        }
         let { data: po } = await supabaseAdmin.from('purchase_orders').select('*').eq('supplier_id', supplier_id).eq('store_id', store_id).eq('status', 'draft').maybeSingle();
         if (!po) {
           const now = new Date();
           const year = now.getFullYear();
           const ts = String(Date.now()).slice(-6);
           const po_number = `PO-${year}-${ts}`;
-          const { data: newPo, error: createError } = await supabaseAdmin.from('purchase_orders').insert({ po_number, supplier_id, store_id, status: 'draft', created_by }).select().single();
+          const { data: newPo, error: createError } = await supabaseAdmin.from('purchase_orders').insert({ po_number, supplier_id, store_id, status: 'draft', created_by, ...(expected_delivery_date ? { expected_delivery_date } : {}) }).select().single();
           if (createError) return res.status(400).json({ error: createError.message });
           po = newPo;
           const { data: supplierName } = await supabaseAdmin.from('suppliers').select('name').eq('supplier_id', supplier_id).single();
@@ -546,12 +551,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         }
       }
 
-      const { data: receiptData } = await supabaseAdmin
+      // Business-date based (D6): prefer delivered_date, fall back to the
+      // received_at audit stamp for legacy rows.
+      const { data: receiptDataRaw } = await supabaseAdmin
         .from('purchase_order_items')
-        .select('plu_id, quantity_received, purchase_orders!inner(store_id, received_at, status)')
+        .select('plu_id, quantity_received, purchase_orders!inner(store_id, delivered_date, received_at, status)')
         .in('purchase_orders.status', ['received', 'partially_received'])
-        .gte('purchase_orders.received_at', eightWeeksAgo)
         .eq('purchase_orders.store_id', store_id);
+      const eightWeeksAgoMs = new Date(eightWeeksAgo).getTime();
+      const receiptData = (receiptDataRaw || []).filter((ri: any) => {
+        const po = (ri as any).purchase_orders;
+        if (!po) return false;
+        if (po.delivered_date) return new Date(`${po.delivered_date}T00:00:00Z`).getTime() >= eightWeeksAgoMs;
+        return po.received_at ? new Date(po.received_at).getTime() >= eightWeeksAgoMs : false;
+      });
 
       const receiptMap = new Map<string, { total: number; count: number }>();
       if (receiptData) {
@@ -648,7 +661,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: 'tenant_schema is required' });
       }
       const env = { supabaseUrl: process.env.VITE_SUPABASE_URL || '', serviceRole: process.env.SERVICE_ROLE || '', anonKey: '' };
-      const identifier = `${schema}:${String(pin).length}`;
+      const identifier = pinThrottleKey(schema, String(pin));
       if (await isPosLoginThrottled(env, identifier)) {
         return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
       }
@@ -714,7 +727,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: 'PIN must be 4-8 digits' });
       }
       const env = { supabaseUrl: process.env.VITE_SUPABASE_URL || '', serviceRole: process.env.SERVICE_ROLE || '', anonKey: '' };
-      const identifier = `pin:${String(pin).length}`;
+      const identifier = pinThrottleKey(undefined, String(pin));
       if (await isPosLoginThrottled(env, identifier)) {
         return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
       }
@@ -821,7 +834,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: 'PIN must be 4-8 digits' });
       }
       const env = { supabaseUrl: process.env.VITE_SUPABASE_URL || '', serviceRole: process.env.SERVICE_ROLE || '', anonKey: '' };
-      const identifier = `admin:${String(pin).length}`;
+      const identifier = pinThrottleKey(undefined, String(pin));
       if (await isPosLoginThrottled(env, identifier)) {
         return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
       }
@@ -917,7 +930,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!store_id && !pin) return res.status(400).json({ error: 'store_id and user_id required' });
       if (pin) {
         if (!/^\d{4,8}$/.test(String(pin))) return res.status(400).json({ error: 'PIN must be 4-8 digits' });
-        const pinIdentifier = `clock:${schema}:${String(pin).length}`;
+        const pinIdentifier = pinThrottleKey(schema, String(pin));
         if (await isPosLoginThrottled(env, pinIdentifier)) {
           return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
         }
@@ -946,7 +959,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let effectiveUserId = user_id;
       if (pin) {
         if (!/^\d{4,8}$/.test(String(pin))) return res.status(400).json({ error: 'PIN must be 4-8 digits' });
-        const pinIdentifier = `clock:${schema}:${String(pin).length}`;
+        const pinIdentifier = pinThrottleKey(schema, String(pin));
         if (await isPosLoginThrottled(env, pinIdentifier)) {
           return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
         }
@@ -975,7 +988,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const pin = typeof req.query.pin === 'string' && req.query.pin ? String(req.query.pin) : null;
       if (pin) {
         if (!/^\d{4,8}$/.test(pin)) return res.status(400).json({ error: 'PIN must be 4-8 digits' });
-        const pinIdentifier = `clock:${schema}:${pin.length}`;
+        const pinIdentifier = pinThrottleKey(schema, pin);
         if (await isPosLoginThrottled(env, pinIdentifier)) {
           return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
         }
@@ -1047,14 +1060,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Purchase Orders: receive delivery (Goods In)
     if (path[0] === 'purchase-orders' && path[1] === 'receive' && method === 'POST') {
-      const { po_id, items, pin } = body;
+      const { po_id, items, pin, delivered_date } = body;
       if (!po_id || !items?.length) return res.status(400).json({ error: 'po_id and items required' });
+      if (delivered_date != null && delivered_date !== '') {
+        const parsed = new Date(`${delivered_date}T00:00:00Z`);
+        if (Number.isNaN(parsed.getTime())) return res.status(400).json({ error: 'delivered_date must be a valid date (YYYY-MM-DD)' });
+        if (parsed.getTime() > Date.now()) return res.status(400).json({ error: 'delivered_date cannot be in the future' });
+      }
       let receiver: { user_id: string; full_name: string } | null = null;
       if (pin) {
         if (!/^\d{4,8}$/.test(String(pin))) {
           return res.status(400).json({ error: 'PIN must be 4-8 digits' });
         }
-        const pinIdentifier = `goods:${schema}:${String(pin).length}`;
+        const pinIdentifier = pinThrottleKey(schema, String(pin));
         if (await isPosLoginThrottled(env, pinIdentifier)) {
           return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
         }
@@ -1084,8 +1102,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       let anythingReceived = false;
       for (const line of receiveLines) {
-        const newQty = (line.poiItem.quantity_received || 0) + line.qty;
-        await supabaseAdmin.from('purchase_order_items').update({ quantity_received: newQty }).eq('po_item_id', line.poiItem.po_item_id);
+        const newQty = Math.round(((line.poiItem.quantity_received || 0) + line.qty) * 1000) / 1000;
+        const { error: qtyErr } = await supabaseAdmin.from('purchase_order_items').update({ quantity_received: newQty }).eq('po_item_id', line.poiItem.po_item_id);
+        if (qtyErr) return res.status(500).json({ error: 'Failed to update received quantity: ' + qtyErr.message });
         anythingReceived = true;
         // Check inventory — canonical plu_id key, legacy name-keyed fallback
         let invItem: any = null;
@@ -1097,14 +1116,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           invItem = legacy?.data ?? null;
         }
         if (invItem) {
-          await supabaseAdmin.from('inventory').update({ stock_quantity: (invItem.stock_quantity || 0) + line.qty }).eq('product_id', invItem.product_id);
+          const { error: incErr } = await supabaseAdmin.from('inventory').update({ stock_quantity: (invItem.stock_quantity || 0) + line.qty }).eq('product_id', invItem.product_id);
+          if (incErr) return res.status(500).json({ error: 'Failed to update stock: ' + incErr.message });
         } else {
           const { data: pluRow } = await supabaseAdmin.from('plu').select('name').eq('plu_id', line.plu_id).single();
           const legacyName = pluRow?.name ? await supabaseAdmin.from('inventory').select('product_id, stock_quantity').eq('store_id', po.store_id).eq('name', pluRow.name).maybeSingle() : null;
           if (legacyName?.data) {
-            await supabaseAdmin.from('inventory').update({ stock_quantity: (legacyName.data.stock_quantity || 0) + line.qty }).eq('product_id', legacyName.data.product_id);
+            const { error: incErr } = await supabaseAdmin.from('inventory').update({ stock_quantity: (legacyName.data.stock_quantity || 0) + line.qty }).eq('product_id', legacyName.data.product_id);
+            if (incErr) return res.status(500).json({ error: 'Failed to update stock: ' + incErr.message });
           } else {
-            await supabaseAdmin.from('inventory').insert({ store_id: po.store_id, plu_id: line.plu_id, name: pluRow?.name || line.plu_id, stock_quantity: line.qty, price: line.poiItem.cost_price_at_order });
+            const { error: insErr } = await supabaseAdmin.from('inventory').insert({ store_id: po.store_id, plu_id: line.plu_id, name: pluRow?.name || line.plu_id, stock_quantity: line.qty, price: line.poiItem.cost_price_at_order });
+            if (insErr) return res.status(500).json({ error: 'Failed to create stock row: ' + insErr.message });
           }
         }
       }
@@ -1115,7 +1137,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (allFullyReceived) newStatus = 'received';
       else if (anyReceived) newStatus = 'partially_received';
       if (!anythingReceived) return res.json({ success: true, status: newStatus, ...(receiver ? { received_by: receiver.user_id } : {}) });
-      const poUpdate: Record<string, unknown> = { status: newStatus, received_at: new Date().toISOString() };
+      // Audit vs business date split (D6): received_at stamped only on first
+      // receipt (never re-stamped, never user-overridable); delivered_date is
+      // the user-editable business date, defaulting to the receive date.
+      const { data: poForStamp } = await supabaseAdmin.from('purchase_orders').select('received_at, delivered_date').eq('po_id', po_id).single();
+      const firstReceive = !poForStamp?.received_at;
+      const nowIso = new Date().toISOString();
+      const effectiveDeliveredDate = (delivered_date != null && delivered_date !== '')
+        ? delivered_date
+        : (poForStamp?.delivered_date ?? nowIso.slice(0, 10));
+      const poUpdate: Record<string, unknown> = { status: newStatus, delivered_date: effectiveDeliveredDate };
+      if (firstReceive) poUpdate.received_at = nowIso;
       if (receiver) poUpdate.received_by = receiver.user_id;
       try {
         await supabaseAdmin.from('purchase_orders').update(poUpdate).eq('po_id', po_id);
@@ -1140,7 +1172,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           });
         } catch { /* logbook write is non-fatal */ }
       }
-      return res.json({ success: true, status: newStatus, ...(receiver ? { received_by: receiver.user_id } : {}) });
+return res.json({ success: true, status: newStatus, delivered_date: effectiveDeliveredDate, ...(receiver ? { received_by: receiver.user_id } : {}) });
     }
 
     // Settings: get currency
@@ -1222,7 +1254,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     // Sales: create (server-validated totals, payment allowlist, persisted cashback)
     if (path[0] === 'sales' && path[1] === 'create' && method === 'POST') {
-      const { store_id, staff_user_id, items, total_amount, discount_amount, payment_method, payment_note, loyalty_card_id, pin } = body;
+      const { store_id, staff_user_id, items, total_amount, discount_amount, payment_method, payment_note, loyalty_card_id, pin, cash_given } = body;
       const PAYMENT_METHODS = ['cash', 'card', 'bank_transfer', 'contactless', 'transfer'];
       if (!store_id || !Array.isArray(items) || items.length === 0) {
         return res.status(400).json({ error: 'store_id, staff_user_id, and items required' });
@@ -1232,6 +1264,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       if (!PAYMENT_METHODS.includes(payment_method || 'cash')) {
         return res.status(400).json({ error: `payment_method must be one of: ${PAYMENT_METHODS.join(', ')}` });
+      }
+      if (cash_given != null && payment_method !== 'cash') {
+        return res.status(400).json({ error: 'cash_given is only valid for cash payments' });
       }
       const { data: store } = await supabaseAdmin.from('stores').select('store_id, store_number').eq('store_id', store_id).maybeSingle();
       if (!store) return res.status(400).json({ error: 'Store not found in this tenant' });
@@ -1257,7 +1292,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       let pinVerified = false;
       if (pin) {
         if (!/^\d{4,8}$/.test(String(pin))) return res.status(400).json({ error: 'PIN must be 4-8 digits' });
-        const pinIdentifier = `sale:${schema}:${String(pin).length}`;
+        const pinIdentifier = pinThrottleKey(schema, String(pin));
         if (await isPosLoginThrottled(env, pinIdentifier)) {
           return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
         }
@@ -1298,6 +1333,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (discount > 0 && !loyalty_card_id) {
         return res.status(400).json({ error: 'Discount requires a loyalty card' });
       }
+      // Cash drawer: server derives change_due; cash_given must cover the total.
+      const effectiveCashGiven = payment_method === 'cash' && cash_given != null ? round2(Number(cash_given)) : null;
+      if (payment_method === 'cash' && effectiveCashGiven == null) {
+        return res.status(400).json({ error: 'cash_given is required for cash payments' });
+      }
+      if (effectiveCashGiven != null && effectiveCashGiven < total - 1e-9) {
+        return res.status(400).json({ error: 'cash_given must be at least the total due' });
+      }
+      const changeDue = effectiveCashGiven != null ? round2(effectiveCashGiven - total) : null;
       const { data: settings } = await supabaseAdmin.from('system_settings').select('value').eq('key', 'loyalty_cashback_percent').maybeSingle();
       const percent = settings?.value?.percent ?? 0;
       const cashbackEarned = loyalty_card_id && percent > 0 ? round2((total * percent) / 100) : 0;
@@ -1306,6 +1350,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         payment_method, payment_note: payment_note || null,
         loyalty_card_id: loyalty_card_id || null,
         cashback_percent: percent, cashback_earned: cashbackEarned,
+        cash_given: effectiveCashGiven, change_due: changeDue,
         status: 'completed',
       }).select().single();
       if (txErr) return res.status(400).json({ error: txErr.message });
@@ -1348,8 +1393,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           invItem = created?.data ?? null;
         }
         if (invItem) {
-          const newQty = Math.max(0, (invItem.stock_quantity || 0) - item.quantity);
-          await supabaseAdmin.from('inventory').update({ stock_quantity: newQty }).eq('product_id', invItem.product_id);
+          const newQty = Math.round(Math.max(0, (invItem.stock_quantity || 0) - item.quantity) * 1000) / 1000;
+          const { error: deductErr } = await supabaseAdmin.from('inventory').update({ stock_quantity: newQty }).eq('product_id', invItem.product_id);
+          if (deductErr) {
+            // No silent 200-with-failed-write: roll back the whole sale
+            await supabaseAdmin.from('sale_items').delete().eq('transaction_id', saleId);
+            await supabaseAdmin.from('sales_transactions').delete().eq('transaction_id', saleId);
+            console.error('Sale stock deduct error:', deductErr);
+            return res.status(500).json({ error: 'Failed to deduct stock: ' + deductErr.message });
+          }
         }
       }
       if (loyalty_card_id && discount > 0) {
@@ -1423,7 +1475,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             invItem = legacyUuid?.data ?? null;
           }
           if (invItem) {
-            await supabaseAdmin.from('inventory').update({ stock_quantity: (invItem.stock_quantity || 0) + item.quantity }).eq('product_id', invItem.product_id);
+            const { error: restoreErr } = await supabaseAdmin.from('inventory').update({ stock_quantity: (invItem.stock_quantity || 0) + item.quantity }).eq('product_id', invItem.product_id);
+            if (restoreErr) return res.status(500).json({ error: 'Failed to restore stock: ' + restoreErr.message });
           }
         }
       }

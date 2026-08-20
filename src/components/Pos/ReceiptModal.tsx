@@ -69,6 +69,19 @@ export default function ReceiptModal({ isOpen, onClose, onPrint, transaction, cu
             {transaction.payment_note ? ` — ${transaction.payment_note}` : ''}
           </div>
 
+          {(transaction.cash_given != null) && (
+            <>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '4px' }}>
+                <span>CASH GIVEN</span>
+                <span>{currencySymbol}{Number(transaction.cash_given).toFixed(2)}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span>CHANGE</span>
+                <span>{currencySymbol}{Number(transaction.change_due ?? 0).toFixed(2)}</span>
+              </div>
+            </>
+          )}
+
           <div style={{ borderTop: '1px dashed #999', margin: '6px 0' }} />
 
           <div style={{ textAlign: 'center', fontSize: '10px' }}>Thank you for your custom!</div>

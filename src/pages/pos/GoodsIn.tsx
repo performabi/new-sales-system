@@ -10,6 +10,7 @@ export default function GoodsIn() {
 
   const [selectedPO, setSelectedPO] = useState<string | null>(null);
   const [receivedQty, setReceivedQty] = useState<Record<string, number>>({});
+  const [deliveredDate, setDeliveredDate] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [showPin, setShowPin] = useState(false);
   const [pin, setPin] = useState<string | null>(null);
@@ -26,10 +27,11 @@ export default function GoodsIn() {
   const handleSelectPO = (poId: string) => {
     setSelectedPO(poId);
     setReceivedQty({});
+    setDeliveredDate('');
   };
 
   const handleQtyChange = (pluId: string, max: number, val: string) => {
-    const parsed = Math.min(max, Math.max(0, parseInt(val) || 0));
+    const parsed = Math.min(max, Math.max(0, parseFloat(val) || 0));
     setReceivedQty((prev) => ({ ...prev, [pluId]: parsed }));
   };
 
@@ -44,11 +46,12 @@ export default function GoodsIn() {
       .map(([plu_id, qty_received]) => ({ plu_id, qty_received }));
     if (items.length === 0) return;
     setSubmitting(true);
-    const { error } = await receiveDelivery(selectedPO, items, pin);
+    const { error } = await receiveDelivery(selectedPO, items, pin, deliveredDate || undefined);
     setSubmitting(false);
     if (error) return;
     setSelectedPO(null);
     setReceivedQty({});
+    setDeliveredDate('');
     fetchPendingPOs(storeId!);
   };
 
@@ -102,6 +105,20 @@ export default function GoodsIn() {
                 <span style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{openPO.suppliers?.name}</span>
               </div>
 
+              <div className="form-group" style={{ marginBottom: '16px', maxWidth: '240px' }}>
+                <label className="form-label">Delivered On (optional)</label>
+                <input
+                  type="date"
+                  className="form-input"
+                  value={deliveredDate}
+                  max={new Date().toISOString().slice(0, 10)}
+                  onChange={(e) => setDeliveredDate(e.target.value)}
+                />
+                <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '4px' }}>
+                  Leave blank to use today's date.
+                </p>
+              </div>
+
               <table className="data-table">
                 <thead>
                   <tr>
@@ -124,6 +141,7 @@ export default function GoodsIn() {
                           className="form-input"
                           type="number"
                           min={0}
+                          step="0.001"
                           max={item.quantity_ordered - (item.quantity_received || 0)}
                           style={{ width: '70px', padding: '4px 8px' }}
                           value={receivedQty[item.plu_id] ?? ''}

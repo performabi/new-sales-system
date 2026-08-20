@@ -124,7 +124,7 @@ interface AppState {
   purchaseOrders: PurchaseOrder[];
   purchaseOrdersLoading: boolean;
   fetchPurchaseOrders: () => Promise<void>;
-  savePoDraft: (data: { supplier_id: string; store_id: string; items: { plu_id: string; quantity_ordered: number; cost_price_at_order: number }[]; created_by?: string }) => Promise<{ error: string | null }>;
+  savePoDraft: (data: { supplier_id: string; store_id: string; items: { plu_id: string; quantity_ordered: number; cost_price_at_order: number }[]; created_by?: string; expected_delivery_date?: string }) => Promise<{ error: string | null }>;
   lockPurchaseOrder: (id: string) => Promise<{ error: string | null }>;
 
   // PO Auto-Suggestions
@@ -161,7 +161,7 @@ interface AppState {
   pendingPOs: any[];
   pendingPOsLoading: boolean;
   fetchPendingPOs: (storeId: string) => Promise<void>;
-  receiveDelivery: (poId: string, items: { plu_id: string; qty_received: number }[], pin: string) => Promise<{ error: string | null }>;
+  receiveDelivery: (poId: string, items: { plu_id: string; qty_received: number }[], pin: string, deliveredDate?: string) => Promise<{ error: string | null }>;
 
   // Currency Config
   currencyConfig: CurrencyConfig | null;
@@ -1436,12 +1436,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  receiveDelivery: async (poId, items, pin) => {
+  receiveDelivery: async (poId, items, pin, deliveredDate) => {
     try {
       const res = await apiFetch('/api/purchase-orders/receive', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ po_id: poId, items, pin }),
+        body: JSON.stringify({ po_id: poId, items, pin, delivered_date: deliveredDate }),
       });
       const result = await res.json();
       if (!res.ok) return { error: result.error || 'Failed to receive delivery' };

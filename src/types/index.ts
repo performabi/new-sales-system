@@ -153,6 +153,7 @@ export interface PurchaseOrder {
   received_at?: string;
   received_by?: string | null;
   expected_delivery_date?: string | null;
+  delivered_date?: string | null;
   suppliers?: {
     name: string;
   };
@@ -170,6 +171,8 @@ export interface SalesTransaction {
   discount_amount: number;
   payment_method: 'cash' | 'card' | 'bank_transfer';
   payment_note?: string | null;
+  cash_given?: number | null;
+  change_due?: number | null;
   status: 'completed' | 'void';
   loyalty_card_id?: string | null;
   created_at: string;

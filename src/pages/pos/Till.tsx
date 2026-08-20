@@ -157,7 +157,7 @@ export default function Till() {
     setShowPayment(true);
   };
 
-  const handlePay = async (method: string, note?: string, _amountTendered?: number) => {
+  const handlePay = async (method: string, note?: string, amountTendered?: number) => {
     const tab = basketTabs.find((t) => t.tabId === activeTabId);
     if (!tab) return;
     const subtotal = tab.items.reduce((sum: number, i: any) => sum + i.unit_price * i.quantity, 0);
@@ -179,6 +179,7 @@ export default function Till() {
       payment_method: method,
       payment_note: note || '',
       loyalty_card_id: tab.loyaltyCardId,
+      cash_given: method === 'cash' && amountTendered != null ? Number(amountTendered) : undefined,
     });
 
     setShowPayment(false);

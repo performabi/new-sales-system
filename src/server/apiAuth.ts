@@ -216,6 +216,17 @@ export async function recordPosAttempt(env: AuthEnv, identifier: string, success
   }
 }
 
+// Deterministic throttle bucket for a PIN attempt. Buckets by the exact PIN
+// value (not length) so that two users who merely share a digit-count are not
+// throttled together. PINs are unique per tenant (see 0d), so a value maps to
+// at most one user within a tenant; the optional schema keeps buckets
+// tenant-scoped where one is known.
+export function pinThrottleKey(schema: string | null | undefined, pin: string): string {
+  const scope = schema && schema !== 'public' ? schema : 'global';
+  const digest = crypto.createHash('sha256').update(`${scope}:${pin}`).digest('hex').slice(0, 24);
+  return `pin:${scope}:${digest}`;
+}
+
 export function requestIp(req: any): string {
   const fwd = req.headers?.['x-forwarded-for'];
   if (typeof fwd === 'string' && fwd.length > 0) return fwd.split(',')[0].trim();

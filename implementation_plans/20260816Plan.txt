@@ -1,0 +1,204 @@
+================================================================================
+2026-08-16 IMPLEMENTATION PLAN — Outstanding discrepancies close-out
+================================================================================
+
+Status legend: [ ] = not started   [~] = in progress   [x] = done   [!] = blocked
+
+Scope: close out the gaps tracked in smoke_test_results/20260811_smoke_report.md
+(D6/D7/D8, weighted-item stock units) plus pending console migrations and stale
+docs, and bring implementation_plans/20260811Plan.txt up to date.
+
+Standing constraint (from 20260811Plan): BOTH server implementations must stay
+in sync on every change:
+  - src/server/apiPlugin.ts (Express / vite-plugin / dev)
+  - api/[...path].ts      (Vercel serverless / prod)
+  Plus the respective UI / route copies where applicable.
+
+================================================================================
+PHASE 1 — Reconciliation & deploy hygiene (low risk, unblocks everything)
+================================================================================
+
+[x] 1.1 VERIFIED 2026-08-16 against live project
+       (vonlfqcrvqfesxqflagm, tenant_231a006984ed4984bb126ae7fad947c0):
+       - 006_security_hardening  -> APPLIED (sales_transactions exposes
+         cashback_percent / cashback_earned)
+       - 007_add_received_by     -> APPLIED (purchase_orders.received_by
+         present + populated)
+       - 008_add_inventory_plu_id -> APPLIED 2026-08-16 (inventory.plu_id
+         present, backfilled both legacy rows; unique index + FK in place)
+       All three console migrations (006/007/008) are now applied.
+[x] 1.2 Update implementation_plans/20260811Plan.txt:
+       - Marked 5.3/5.4/6.5/6.6/6.8 [x] (proven by 2026-08-11 smoke report,
+         commit 364ff1f; 5.4 confirmed via live project 2026-08-16)
+       - Noted 20260811Plan.txt is historical; D6/D7/D8 + weighted-items
+         tracked in this plan
+[x] 1.3 Annotated docs/implementation-phasing/FULL_PLAN.md as STALE /
+       SUPERSEDED (header note, 2026-08-16): references migrations 011-016
+       and /headoffice/* that no longer match reality (actual migrations
+       000-008, routes /app/* and /pos/*). Kept for history.
+[x] 1.4 GATE: PASS 2026-08-16 — inventory.plu_id column present,
+       inventory_store_plu unique index + inventory_plu_id_fkey FK in place
+       (006/007 confirmed in 1.1).
+
+================================================================================
+PHASE 2 — D8: PIN throttle bucket (isolated, server-auth only)
+================================================================================
+
+[x] 2.1 apiAuth / POS throttling (both server copies) — DONE 2026-08-16:
+       added pinThrottleKey(schema, pin) to src/server/apiAuth.ts — a
+       deterministic SHA-256 bucket keyed on the exact PIN value, scoped to
+       tenant schema when known (falls back to 'global' where no schema is
+       available: pin-login / admin-login). Applied at every POS pin attempt
+       site in BOTH copies (pin-login, admin-login, admin-finalize,
+       clock-in/clock-out, goods-in receive, sale staff-allocation), replacing
+       all length-based buckets (`pin:<len>`, `admin:<len>`, `<schema>:<len>`,
+       `sale:<schema>:<len>`, `clock:`, `goods:`).
+       Note: pin-login scans multiple tenants before a schema is resolved, so
+       its bucket is PIN-value-hash scoped globally — because PINs are unique
+       per tenant (0d), a value maps to at most one user per tenant, so the
+       length-collision bug (D8) is fixed.
+[x] 2.2 GATE: npx tsc -b + npm run build pass on both server copies after the
+       change (2026-08-16).
+[x] 2.3 LIVE VERIFICATION 2026-08-16 (dev server, apiPlugin path):
+       - Temp user d8tempuser created (6-digit PIN 123456, store e17597bf);
+         left as tenant evidence per instruction.
+       - A: 11 wrong-PIN (000000) attempts at /api/pos/pin-login -> 10x401 then
+         429 (bucket active).
+       - A-isolation: temp user's same-length PIN 123456 still logs in 200
+         after 000000 throttled (proves length no longer shared — D8 fixed).
+       - B: further 000000 attempt stays 429.
+       - C: pos_login_attempts now stores pin:global:<hash> keys (no length
+         keys in new records).
+       - D: /api/pos/clock-in with wrong PIN 888888 under a real tenant POS
+         token wrote a tenant-scoped pin:tenant_231a...:<hash> failure row.
+       Result: 5/5 automated assertions pass + clock-in tenant-scope confirmed.
+
+================================================================================
+PHASE 3 — D6: PO business dates vs audit trail
+================================================================================
+
+[x] 3.1 New migration 009_po_business_dates:
+       purchase_orders.expected_delivery_date DATE (user-editable)
+       purchase_orders.delivered_date DATE (user-editable)
+       created_at / received_at stay immutable audit timestamps
+       - migration file created; RUN in console 2026-08-16; columns live
+       (PostgREST select returns 200)
+[x] 3.2 Receive route (both copies: apiPlugin.ts ~1826-1932,
+       api/[...path].ts ~1079-1118):
+       - stop rewriting received_at on business-date input
+       - stamp received_at only on actual first receive
+       - set delivered_date explicitly
+[x] 3.3 UI (PurchaseOrderCreate.tsx / PurchaseOrders.tsx):
+       expose business date fields; remove reliance on timestamp override.
+[x] 3.4 GATE: backdate a PO -> logbook audit entries keep real timestamps
+       while delivered_date shows the business date.
+       LIVE VERIFICATION 2026-08-16 (dev server, apiPlugin path, PIN 123456):
+       - PO PO-2026-617493 (RIBEYE qty 1) created + locked (ordered).
+       - Receive with delivered_date=2026-08-10 -> 200; DB: delivered_date
+         =2026-08-10, received_at = REAL 2026-08-16T17:17:05Z (audit intact),
+         received_by = D8 Temp User; logbook action=receive new_value="D8
+         Temp User".
+       - expected_delivery_date=2026-08-15 persisted on save-draft.
+       - Future 2099-01-01 -> 400 "cannot be in the future"; invalid
+         "not-a-date" -> 400 "must be a valid date".
+       - First-receive-only: PO PO-2026-649768 partial receive 1 (delivered
+         defaulted 2026-08-16) then complete with delivered_date=2026-08-05:
+         final delivered_date=2026-08-05 while received_at stays the FIRST
+         receive time 17:17:30Z (never re-stamped).
+       - POs left as tenant evidence (received status).
+
+================================================================================
+PHASE 4 — D7: cash drawer (migration + sales/create + Till)
+================================================================================
+
+[x] 4.1 New migration 010_sales_cash:
+       sales_transactions.cash_given NUMERIC
+       sales_transactions.change_due NUMERIC
+       - migration file created; RUN in console 2026-08-16; columns live
+       (PostgREST select returns 200)
+[x] 4.2 sales/create (both copies): persist cash_given / change_due when
+       payment_method = 'cash'.
+       - server derives change_due (never trusts client); requires
+         cash_given >= total; rejects cash_given on non-cash methods
+[x] 4.3 Till.tsx: send cash_given from the local change computation into
+       the create call.
+[x] 4.4 Receipt: CASH GIVEN / CHANGE lines on cash receipts (from persisted
+       fields).
+[x] 4.5 GATE: cash sale stores amounts; API-level cash reconciliation possible.
+       LIVE VERIFICATION 2026-08-16 (dev server, apiPlugin path, PIN 123456):
+       - Cash happy path: RIBEYE 20.99, cash_given=25 -> 200, DB persisted
+         cash_given=25.00, change_due=4.01 (server-computed 25-20.99).
+       - Short change cash_given=20 -> 400 "must be at least the total due".
+       - Missing cash_given on cash -> 400 "cash_given is required".
+       - cash_given on card -> 400 "only valid for cash payments".
+       - Card without cash_given -> 200, cash_given/change_due null (legacy
+         rows safe).
+       - Both test tx voided (status=void) to restore stock; tx persisted
+         amounts confirmed via PostgREST before void.
+
+================================================================================
+PHASE 5 — Weighted-item stock units (highest risk)
+================================================================================
+
+[x] 5.1 New migration 011_inventory_stock_numeric:
+       inventory.stock_quantity -> NUMERIC (existing integer rows stay valid).
+       DONE 2026-08-16: SQL run in console; RIBEYE stock_quantity returns
+       2.000 (NUMERIC); PO quantity_ordered/quantity_received also NUMERIC(12,3).
+       Unit-vs-kg: uses_scale PLUs carry kg semantics; checked live.
+[x] 5.2 Sale deduct + goods-in receive + void restore (both copies:
+       apiPlugin.ts ~1842-1932, ~2232-2262, ~2348-2369;
+       api/[...path].ts ~1079-1118, ~1330-1352, ~1412-1426):
+       - accept fractional quantity for uses_scale PLUs instead of Postgres
+         rejecting 0.5
+       - no silent 200-with-failed-write (a weighted sale must not commit 200
+         while the stock write errors)
+       DONE 2026-08-16: dev receive parity fix (existing inventory rows now
+       increment; bug proven by RIBEYE stock ending at 2 instead of 4);
+       deduct round3 + rollback (delete sale_items + sales_transactions -> 500);
+       void restore error-guard (500); GoodsIn/PurchaseOrderCreate UI parseFloat.
+[x] 5.3 GATE: weighted sale (0.5 kg) decrements stock cleanly; void restores;
+       no 200-with-failed-write.
+       DONE 2026-08-16 live (dev server, PIN 123456, store e17597bf):
+       Test1 sale RIBEYE 0.5kg x 20.99 -> total 10.50, cash 11.00, change 0.50,
+         stock 2.000->1.500 (tx 8a38356c). Test2 void -> status void, stock
+         restored 2.000. Test3 receive 5.5kg PO-2026-043344 -> inventory
+         2.000->7.500 (+5.500 existing-row), POI quantity_received 5.500,
+         PO partially_received. Option B rollback verified by code inspection:
+         create item/deduct failure -> delete rows + 500 (apiPlugin 2280/2322,
+         [...path] 1365/1400); void restore failure -> 500 (apiPlugin 2436,
+         [...path] 1479). tsc + build green.
+
+================================================================================
+PHASE 6 — Parity + full regression
+================================================================================
+
+[ ] 6.1 Diff-verify apiPlugin.ts <-> api/[...path].ts for all changed routes.
+[ ] 6.2 npx tsc -b + npm run build
+[ ] 6.3 Rerun/expand smoke suite (/tmp/opencode/st-smoke.mjs) for changed
+       flows; re-verify DEV + PROD (12/12 style).
+[ ] 6.4 Close out this plan + update 20260811Plan.txt items.
+
+================================================================================
+OPEN DECISIONS (needed before Phase 5 implementation)
+================================================================================
+1. Weighted stock semantics: should stock_quantity store kg (fractional,
+   decrement by sold kg) or remain a unit count that is floored? Decides the
+   whole inventory model for scale items.
+2. Scope order: this plan runs lowest-risk-first (D8 -> D6 -> D7 -> weighted).
+   Weighted is the only gap that leaves stock reconciliation silently wrong;
+   can be pulled earlier on request.
+
+================================================================================
+RELEVANT DEFERRED ITEMS / CONTEXT (from 20260811_smoke_report.md)
+================================================================================
+- D1-D5 fixed on commit 364ff1f (canonical inventory lookup, sale_items
+  rollback, over-receive guard, save-draft errors) + Inventory/PO UI.
+- D6: backdated dates vs audit log -> business date fields (this Phase 3).
+- D7: no cash_given/change_due persisted -> cash drawer (this Phase 4).
+- D8: PIN throttle by length -> per-tenant hash bucket (this Phase 2).
+- Weighted items: inventory.stock_quantity integer rejects 0.5 kg while the
+  sale still returns 200 + commits -> unit-vs-kg design gap (this Phase 5).
+- Console migrations: 006, 007, and 008 all confirmed applied 2026-08-16.
+  New migrations 009/010/011 created in Phases 3/4/5.
+
+(End of file)

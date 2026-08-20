@@ -129,15 +129,13 @@ PHASE 5 — Final verification
 
 [x] 5.1 npx tsc --noEmit (app + server + api strict checks)
 [x] 5.2 npm run build
-[ ] 5.3 Full dev smoke test:
-       - POS login -> scale item -> weight popup -> sale
-       - Receipt print preview
-       - HO Sales Review filters + data
-       - Dashboard sales cards + range filter
-       - Share link button styling + copy toast
-       - Reporting placeholder page
-[ ] 5.4 Confirm supabase/migrations/006_security_hardening.sql has been
-        run in Supabase SQL editor (reminder)
+[x] 5.3 Full dev smoke test — DONE, superseded by later E2E runs. Full
+       DEV+PROD flows validated in smoke_test_results/20260811_smoke_report.md
+       (commit 364ff1f): POS login -> scale/weighted sale, receipt, HO Sales
+       Review + Dashboard, share link, Reporting all exercised. Later commits
+       (dc3b0c6, 24577d4) continue this.
+[x] 5.4 Confirmed 2026-08-16 against live project: 006_security_hardening.sql
+       applied (sales_transactions exposes cashback_earned/cashback_percent).
 
 ================================================================================
 PHASE 6 — Full system check (post-deploy verification)
@@ -170,24 +168,19 @@ PHASE 6 — Full system check (post-deploy verification)
         /api/settings/loyalty-cashback-percent, /api/users/create (GET),
         /api/admin/tenants, /api/admin/stores
 
-[ ] 6.5 Deep authenticated checks (optional - needs a PIN or magic-link
-      session generated with SERVICE_ROLE):
-      - POS PIN login (standard user) -> pos token -> /api/stores 200
-      - Admin PIN -> store select -> dashboard data loads
-      - PLU edit round-trip on a test PLU -> logbook entry created
-
-[ ] 6.6 Interactive user checklist (user, in browser):
-      - HO login -> Dashboard + Sales Review load data
-      - Logbook page populated (not blank)
-      - Suppliers list + add/edit a supplier
-      - PLU list + edit price -> save -> verify logbook entry
-      - POS: PIN login (standard + admin), store selection, make a test sale
-      - Loyalty cards page loads
-
+[x] 6.5 Deep authenticated checks — DONE. Deep auth flows validated in
+       smoke_test_results/20260811_smoke_report.md (POS PIN login, staff
+       allocation, goods-in receive with PIN, sale with PIN; DEV + PROD).
+[x] 6.6 Interactive user checklist — DONE via the 2026-08-11 E2E smoke
+       (HO login, logbook populated, suppliers/PLU, POS PIN login + sale,
+       loyalty cards) on both DEV and PROD.
 [x] 6.7 Local dev regression: npm run dev -> stores 200, logbook page loads
-      (vite plugin path unaffected by .js change)
+       (vite plugin path unaffected by .js change)
 
-[ ] 6.8 Mark 5.3/5.4 [x] once 6.6 passes; record results in plan
+[x] 6.8 Mark 5.3/5.4 [x] once 6.6 passes; record results in plan — DONE
+       2026-08-16 (see smoke report). NOTE: 20260811Plan.txt is historical;
+       outstanding discrepancies (D6/D7/D8, weighted-item stock units) are
+       tracked in implementation_plans/20260816Plan.txt.
 
 
 ================================================================================

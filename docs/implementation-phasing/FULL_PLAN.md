@@ -1,5 +1,12 @@
 # New Sales System — Full Implementation Plan
 
+> **STALE / SUPERSEDED (annotated 2026-08-16).** This is an early design doc.
+> References migrations `011–016` and `/headoffice/*` routes that no longer
+> match reality: actual migrations are `000–008` (live project confirmed
+> 006/007/008 applied) and app routes are `/app/*` and `/pos/*`. See the
+> authoritative, current plan in `implementation_plans/` (20260811Plan.txt,
+> 20260816Plan.txt) and `smoke_test_results/`. Kept only for history.
+
 ## Architecture
 
 ```

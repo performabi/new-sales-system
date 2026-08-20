@@ -32,6 +32,7 @@ export default function PurchaseOrderCreate() {
 
   const [manualStoreId, setManualStoreId] = useState('');
   const [manualSupplierId, setManualSupplierId] = useState('');
+  const [expectedDeliveryDate, setExpectedDeliveryDate] = useState('');
   const [manualItems, setManualItems] = useState<ManualItem[]>([]);
   const [manualSubmitting, setManualSubmitting] = useState(false);
 
@@ -108,6 +109,7 @@ export default function PurchaseOrderCreate() {
         cost_price_at_order: i.cost_price_at_order,
       })),
       created_by: profile?.user_id,
+      ...(expectedDeliveryDate ? { expected_delivery_date: expectedDeliveryDate } : {}),
     });
     setManualSubmitting(false);
     if (!result.error) {
@@ -145,6 +147,15 @@ export default function PurchaseOrderCreate() {
               <option key={s.supplier_id} value={s.supplier_id}>{s.name}</option>
             ))}
           </select>
+        </div>
+        <div className="form-group" style={{ marginBottom: 0, minWidth: '200px' }}>
+          <label className="form-label">Expected Delivery</label>
+          <input
+            type="date"
+            className="form-input"
+            value={expectedDeliveryDate}
+            onChange={(e) => setExpectedDeliveryDate(e.target.value)}
+          />
         </div>
       </div>
 
@@ -207,9 +218,9 @@ export default function PurchaseOrderCreate() {
                 </select>
               </div>
               <div className="form-group" style={{ marginBottom: 0, minWidth: 0 }}>
-                <input type="number" min="1" className="form-input" style={{ textAlign: 'center' }}
+                <input type="number" min="0.001" step="0.001" className="form-input" style={{ textAlign: 'center' }}
                   value={item.quantity_ordered}
-                  onChange={(e) => updateManualItem(idx, 'quantity_ordered', parseInt(e.target.value, 10) || 0)} />
+                  onChange={(e) => updateManualItem(idx, 'quantity_ordered', parseFloat(e.target.value) || 0)} />
               </div>
               <div className="form-group" style={{ marginBottom: 0, minWidth: 0 }}>
                 <input type="number" step="0.01" min="0" className="form-input" style={{ textAlign: 'center' }}

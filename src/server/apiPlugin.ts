@@ -12,6 +12,7 @@ import {
   isSuperAdminUser,
   isPublicPath,
   isPosLoginThrottled,
+  pinThrottleKey,
   recordPosAttempt,
   requestIp,
   type AuthEnv,
@@ -851,8 +852,12 @@ export function apiPlugin(): Plugin {
       // ---- Purchase Orders: create/update draft ----
       app.post('/api/purchase-orders/save-draft', async (req, res) => {
         try {
-          const { supplier_id, store_id, items, created_by } = req.body;
+          const { supplier_id, store_id, items, created_by, expected_delivery_date } = req.body;
           const supabaseAdmin = getSupabaseAdmin(server);
+          if (expected_delivery_date != null && expected_delivery_date !== '') {
+            const parsed = new Date(`${expected_delivery_date}T00:00:00Z`);
+            if (Number.isNaN(parsed.getTime())) return res.status(400).json({ error: 'expected_delivery_date must be a valid date (YYYY-MM-DD)' });
+          }
 
           // Check if there is an existing draft for this supplier/store
           let { data: po } = await supabaseAdmin
@@ -876,7 +881,8 @@ export function apiPlugin(): Plugin {
                 supplier_id,
                 store_id,
                 status: 'draft',
-                created_by
+                created_by,
+                ...(expected_delivery_date ? { expected_delivery_date } : {}),
               })
               .select()
               .single();
@@ -1020,7 +1026,7 @@ export function apiPlugin(): Plugin {
             return res.status(400).json({ error: 'tenant_schema is required' });
           }
 
-          const identifier = `${tenantSchema}:${String(pin).length}`;
+          const identifier = pinThrottleKey(tenantSchema, String(pin));
           if (await isPosLoginThrottled(authEnv, identifier)) {
             return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
           }
@@ -1104,7 +1110,7 @@ export function apiPlugin(): Plugin {
             return res.status(400).json({ error: 'PIN must be 4-8 digits' });
           }
 
-          const identifier = `pin:${String(pin).length}`;
+          const identifier = pinThrottleKey(undefined, String(pin));
           if (await isPosLoginThrottled(authEnv, identifier)) {
             return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
           }
@@ -1222,7 +1228,7 @@ export function apiPlugin(): Plugin {
             return res.status(400).json({ error: 'PIN must be 4-8 digits' });
           }
           if (verify_only) {
-            const identifier = `admin:${String(pin).length}`;
+            const identifier = pinThrottleKey(undefined, String(pin));
             if (await isPosLoginThrottled(authEnv, identifier)) {
               return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
             }
@@ -1256,7 +1262,7 @@ export function apiPlugin(): Plugin {
             return res.status(400).json({ error: 'tenant_schema required' });
           }
 
-          const identifier = `admin:${String(pin).length}`;
+          const identifier = pinThrottleKey(undefined, String(pin));
           if (await isPosLoginThrottled(authEnv, identifier)) {
             return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
           }
@@ -1441,26 +1447,34 @@ export function apiPlugin(): Plugin {
           // Fetch sales data (last 7 days) for this store
           const { data: salesData } = await supabaseAdmin
             .from('sale_items')
-            .select('plu_name, quantity, sales_transactions!inner(store_id, created_at)')
+            .select('plu_id, quantity, sales_transactions!inner(store_id, created_at)')
             .gte('sales_transactions.created_at', sevenDaysAgo)
             .eq('sales_transactions.store_id', store_id);
 
-          // Aggregate daily sales per PLU name
+          // Aggregate daily sales per PLU id
           const salesMap = new Map<string, number>();
           if (salesData) {
             for (const si of salesData) {
-              const curr = salesMap.get(si.plu_name) ?? 0;
-              salesMap.set(si.plu_name, curr + Number(si.quantity));
+              const curr = salesMap.get(si.plu_id) ?? 0;
+              salesMap.set(si.plu_id, curr + Number(si.quantity));
             }
           }
 
-          // Fetch historical receipts (last 8 weeks) for this store
-          const { data: receiptData } = await supabaseAdmin
+          // Fetch historical receipts (last 8 weeks) for this store.
+          // Business-date based (D6): prefer delivered_date (user-editable),
+          // falling back to the received_at audit stamp for legacy rows.
+          const { data: receiptDataRaw } = await supabaseAdmin
             .from('purchase_order_items')
-            .select('plu_id, quantity_received, purchase_orders!inner(store_id, received_at, status)')
+            .select('plu_id, quantity_received, purchase_orders!inner(store_id, delivered_date, received_at, status)')
             .in('purchase_orders.status', ['received', 'partially_received'])
-            .gte('purchase_orders.received_at', eightWeeksAgo)
             .eq('purchase_orders.store_id', store_id);
+          const eightWeeksAgoMs = new Date(eightWeeksAgo).getTime();
+          const receiptData = (receiptDataRaw || []).filter((ri: any) => {
+            const po = (ri as any).purchase_orders;
+            if (!po) return false;
+            if (po.delivered_date) return new Date(`${po.delivered_date}T00:00:00Z`).getTime() >= eightWeeksAgoMs;
+            return po.received_at ? new Date(po.received_at).getTime() >= eightWeeksAgoMs : false;
+          });
 
           // Aggregate average receipt per PLU
           const receiptMap = new Map<string, { total: number; count: number }>();
@@ -1488,7 +1502,7 @@ export function apiPlugin(): Plugin {
             const supplier = (sp as any).suppliers;
             if (!plu || !supplier) continue;
 
-            const totalSales7d = plu ? (salesMap.get(plu.name) ?? 0) : 0;
+            const totalSales7d = salesMap.get(sp.plu_id) ?? 0;
             const avgDailySales = totalSales7d / 7;
 
             const receiptAgg = receiptMap.get(sp.plu_id);
@@ -1553,7 +1567,7 @@ export function apiPlugin(): Plugin {
               return res.status(400).json({ error: 'PIN must be 4-8 digits' });
             }
             const tenantSchemaForPin = (req as any).tenantSchema || '';
-            const pinIdentifier = `clock:${tenantSchemaForPin}:${String(pin).length}`;
+            const pinIdentifier = pinThrottleKey(tenantSchemaForPin, String(pin));
             if (await isPosLoginThrottled(authEnv, pinIdentifier)) {
               return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
             }
@@ -1601,7 +1615,7 @@ export function apiPlugin(): Plugin {
               return res.status(400).json({ error: 'PIN must be 4-8 digits' });
             }
             const tenantSchemaForPin = (req as any).tenantSchema || '';
-            const pinIdentifier = `clock:${tenantSchemaForPin}:${String(pin).length}`;
+            const pinIdentifier = pinThrottleKey(tenantSchemaForPin, String(pin));
             if (await isPosLoginThrottled(authEnv, pinIdentifier)) {
               return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
             }
@@ -1657,7 +1671,7 @@ export function apiPlugin(): Plugin {
               return res.status(400).json({ error: 'PIN must be 4-8 digits' });
             }
             const tenantSchemaForPin = (req as any).tenantSchema || '';
-            const pinIdentifier = `clock:${tenantSchemaForPin}:${pin.length}`;
+            const pinIdentifier = pinThrottleKey(tenantSchemaForPin, pin);
             if (await isPosLoginThrottled(authEnv, pinIdentifier)) {
               return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
             }
@@ -1796,8 +1810,13 @@ export function apiPlugin(): Plugin {
       // ---- Purchase Orders: receive delivery (Goods In, PIN-verified staff allocation) ----
       app.post('/api/purchase-orders/receive', async (req, res) => {
         try {
-          const { po_id, items, pin } = req.body;
+          const { po_id, items, pin, delivered_date } = req.body;
           if (!po_id || !items?.length) return res.status(400).json({ error: 'po_id and items required' });
+          if (delivered_date != null && delivered_date !== '') {
+            const parsed = new Date(`${delivered_date}T00:00:00Z`);
+            if (Number.isNaN(parsed.getTime())) return res.status(400).json({ error: 'delivered_date must be a valid date (YYYY-MM-DD)' });
+            if (parsed.getTime() > Date.now()) return res.status(400).json({ error: 'delivered_date cannot be in the future' });
+          }
           const supabaseAdmin = getSupabaseAdmin(server);
 
           let receiver: { user_id: string; full_name: string } | null = null;
@@ -1806,7 +1825,7 @@ export function apiPlugin(): Plugin {
               return res.status(400).json({ error: 'PIN must be 4-8 digits' });
             }
             const tenantSchemaForPin = (req as any).tenantSchema || '';
-            const pinIdentifier = `goods:${tenantSchemaForPin}:${String(pin).length}`;
+            const pinIdentifier = pinThrottleKey(tenantSchemaForPin, String(pin));
             if (await isPosLoginThrottled(authEnv, pinIdentifier)) {
               return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
             }
@@ -1848,11 +1867,12 @@ export function apiPlugin(): Plugin {
 
           let anythingReceived = false;
           for (const line of receiveLines) {
-            const newQty = (line.poiItem.quantity_received || 0) + line.qty;
-            await supabaseAdmin
+            const newQty = Math.round(((line.poiItem.quantity_received || 0) + line.qty) * 1000) / 1000;
+            const { error: qtyErr } = await supabaseAdmin
               .from('purchase_order_items')
               .update({ quantity_received: newQty })
               .eq('po_item_id', line.poiItem.po_item_id);
+            if (qtyErr) return res.status(500).json({ error: 'Failed to update received quantity: ' + qtyErr.message });
             anythingReceived = true;
 
             // Check inventory — canonical plu_id key, legacy name-keyed fallback
@@ -1887,14 +1907,20 @@ export function apiPlugin(): Plugin {
                 .maybeSingle() : null;
               invItem = legacyName?.data ?? null;
             }
-            if (!invItem) {
+            if (invItem) {
+              const { error: incErr } = await supabaseAdmin
+                .from('inventory')
+                .update({ stock_quantity: (invItem.stock_quantity || 0) + line.qty })
+                .eq('product_id', invItem.product_id);
+              if (incErr) return res.status(500).json({ error: 'Failed to update stock: ' + incErr.message });
+            } else {
               // Get PLU name for inventory entry
               const { data: pluRow } = await supabaseAdmin
                 .from('plu')
                 .select('name')
                 .eq('plu_id', line.plu_id)
                 .single();
-              await supabaseAdmin
+              const { error: insErr } = await supabaseAdmin
                 .from('inventory')
                 .insert({
                   store_id: po.store_id,
@@ -1903,6 +1929,7 @@ export function apiPlugin(): Plugin {
                   stock_quantity: line.qty,
                   price: line.poiItem.cost_price_at_order,
                 });
+              if (insErr) return res.status(500).json({ error: 'Failed to create stock row: ' + insErr.message });
             }
           }
 
@@ -1918,19 +1945,35 @@ export function apiPlugin(): Plugin {
           if (allFullyReceived) newStatus = 'received';
           else if (anyReceived) newStatus = 'partially_received';
 
-          if (!anythingReceived) return res.json({ success: true, received_by: receiver?.user_id ?? null });
+          if (!anythingReceived) return res.json({ success: true, status: newStatus, ...(receiver ? { received_by: receiver.user_id } : {}) });
+
+          // Audit vs business date split (D6): received_at is the server audit
+          // timestamp, stamped only on FIRST receipt (never re-stamped on
+          // partial re-receives, never user-overridable). delivered_date is the
+          // user-editable business date, defaulting to the receive date.
+          const { data: poForStamp } = await supabaseAdmin
+            .from('purchase_orders')
+            .select('received_at, delivered_date')
+            .eq('po_id', po_id)
+            .single();
+          const firstReceive = !poForStamp?.received_at;
+          const nowIso = new Date().toISOString();
+          const effectiveDeliveredDate = (delivered_date != null && delivered_date !== '')
+            ? delivered_date
+            : (poForStamp?.delivered_date ?? nowIso.slice(0, 10));
+          const poUpdate: Record<string, unknown> = {
+            status: newStatus,
+            delivered_date: effectiveDeliveredDate,
+          };
+          if (firstReceive) poUpdate.received_at = nowIso;
+          if (receiver) poUpdate.received_by = receiver.user_id;
 
           try {
-            await supabaseAdmin
-              .from('purchase_orders')
-              .update({ status: newStatus, received_at: new Date().toISOString(), ...(receiver ? { received_by: receiver.user_id } : {}) })
-              .eq('po_id', po_id);
+            await supabaseAdmin.from('purchase_orders').update(poUpdate).eq('po_id', po_id);
           } catch {
             if (receiver) {
-              await supabaseAdmin
-                .from('purchase_orders')
-                .update({ status: newStatus, received_at: new Date().toISOString() })
-                .eq('po_id', po_id);
+              delete poUpdate.received_by;
+              await supabaseAdmin.from('purchase_orders').update(poUpdate).eq('po_id', po_id);
             } else {
               throw new Error('Failed to update purchase order');
             }
@@ -1952,7 +1995,7 @@ export function apiPlugin(): Plugin {
             } catch { /* logbook write is non-fatal */ }
           }
 
-          return res.json({ success: true, status: newStatus, ...(receiver ? { received_by: receiver.user_id } : {}) });
+          return res.json({ success: true, status: newStatus, delivered_date: effectiveDeliveredDate, ...(receiver ? { received_by: receiver.user_id } : {}) });
         } catch (err) {
           console.error('Receive delivery error:', err);
           return res.status(500).json({ error: 'Internal server error' });
@@ -2089,7 +2132,7 @@ export function apiPlugin(): Plugin {
 
       app.post('/api/sales/create', async (req, res) => {
         try {
-          const { store_id, staff_user_id, items, total_amount, discount_amount, payment_method, payment_note, loyalty_card_id, pin } = req.body;
+          const { store_id, staff_user_id, items, total_amount, discount_amount, payment_method, payment_note, loyalty_card_id, pin, cash_given } = req.body;
           if (!store_id || !Array.isArray(items) || items.length === 0) {
             return res.status(400).json({ error: 'store_id, staff_user_id, and items required' });
           }
@@ -2098,6 +2141,9 @@ export function apiPlugin(): Plugin {
           }
           if (!PAYMENT_METHODS.includes(payment_method || 'cash')) {
             return res.status(400).json({ error: `payment_method must be one of: ${PAYMENT_METHODS.join(', ')}` });
+          }
+          if (cash_given != null && payment_method !== 'cash') {
+            return res.status(400).json({ error: 'cash_given is only valid for cash payments' });
           }
 
           const supabaseAdmin = getSupabaseAdmin(server);
@@ -2111,7 +2157,7 @@ export function apiPlugin(): Plugin {
               return res.status(400).json({ error: 'PIN must be 4-8 digits' });
             }
             const tenantSchemaForPin = (req as any).tenantSchema || '';
-            const pinIdentifier = `sale:${tenantSchemaForPin}:${String(pin).length}`;
+            const pinIdentifier = pinThrottleKey(tenantSchemaForPin, String(pin));
             if (await isPosLoginThrottled(authEnv, pinIdentifier)) {
               return res.status(429).json({ error: 'Too many attempts. Try again in 15 minutes.' });
             }
@@ -2145,6 +2191,7 @@ export function apiPlugin(): Plugin {
           if (!store) return res.status(400).json({ error: 'Store not found in this tenant' });
 
           const round2 = (n: number) => Math.round(n * 100) / 100;
+          const round3 = (n: number) => Math.round(n * 1000) / 1000;
 
           // Server-side price validation: every line must match the PLU's configured price
           const pluIds = [...new Set(items.map((i: any) => i.plu_id))];
@@ -2185,6 +2232,16 @@ export function apiPlugin(): Plugin {
             return res.status(400).json({ error: 'Discount requires a loyalty card' });
           }
 
+          // Cash drawer: server derives change_due; cash_given must cover the total.
+          const effectiveCashGiven = payment_method === 'cash' && cash_given != null ? round2(Number(cash_given)) : null;
+          if (payment_method === 'cash' && effectiveCashGiven == null) {
+            return res.status(400).json({ error: 'cash_given is required for cash payments' });
+          }
+          if (effectiveCashGiven != null && effectiveCashGiven < total - 1e-9) {
+            return res.status(400).json({ error: 'cash_given must be at least the total due' });
+          }
+          const changeDue = effectiveCashGiven != null ? round2(effectiveCashGiven - total) : null;
+
           // Resolve cashback percent (persist with the transaction for accurate voiding)
           const { data: settings } = await supabaseAdmin.from('system_settings')
             .select('value').eq('key', 'loyalty_cashback_percent').maybeSingle();
@@ -2202,6 +2259,8 @@ export function apiPlugin(): Plugin {
             loyalty_card_id: loyalty_card_id || null,
             cashback_percent: percent,
             cashback_earned: cashbackEarned,
+            cash_given: effectiveCashGiven,
+            change_due: changeDue,
             status: 'completed',
           }).select().single();
           if (txErr) return res.status(400).json({ error: txErr.message });
@@ -2258,8 +2317,15 @@ export function apiPlugin(): Plugin {
               invItem = created?.data ?? null;
             }
             if (invItem) {
-              const newQty = Math.max(0, (invItem.stock_quantity || 0) - item.quantity);
-              await supabaseAdmin.from('inventory').update({ stock_quantity: newQty }).eq('product_id', invItem.product_id);
+              const newQty = round3(Math.max(0, (invItem.stock_quantity || 0) - item.quantity));
+              const { error: deductErr } = await supabaseAdmin.from('inventory').update({ stock_quantity: newQty }).eq('product_id', invItem.product_id);
+              if (deductErr) {
+                // No silent 200-with-failed-write: roll back the whole sale
+                await supabaseAdmin.from('sale_items').delete().eq('transaction_id', saleId);
+                await supabaseAdmin.from('sales_transactions').delete().eq('transaction_id', saleId);
+                console.error('Sale stock deduct error:', deductErr);
+                return res.status(500).json({ error: 'Failed to deduct stock: ' + deductErr.message });
+              }
             }
           }
 
@@ -2366,7 +2432,8 @@ export function apiPlugin(): Plugin {
                 invItem = legacyUuid?.data ?? null;
               }
               if (invItem) {
-                await supabaseAdmin.from('inventory').update({ stock_quantity: (invItem.stock_quantity || 0) + item.quantity }).eq('product_id', invItem.product_id);
+                const { error: restoreErr } = await supabaseAdmin.from('inventory').update({ stock_quantity: (invItem.stock_quantity || 0) + item.quantity }).eq('product_id', invItem.product_id);
+                if (restoreErr) return res.status(500).json({ error: 'Failed to restore stock: ' + restoreErr.message });
               }
             }
           }
