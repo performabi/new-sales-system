@@ -172,11 +172,34 @@ PHASE 5 — Weighted-item stock units (highest risk)
 PHASE 6 — Parity + full regression
 ================================================================================
 
-[ ] 6.1 Diff-verify apiPlugin.ts <-> api/[...path].ts for all changed routes.
-[ ] 6.2 npx tsc -b + npm run build
-[ ] 6.3 Rerun/expand smoke suite (/tmp/opencode/st-smoke.mjs) for changed
-       flows; re-verify DEV + PROD (12/12 style).
-[ ] 6.4 Close out this plan + update 20260811Plan.txt items.
+[x] 6.1 Diff-verify apiPlugin.ts <-> api/[...path].ts for all changed routes.
+       DONE 2026-08-20: extracted + token-compared route bodies for
+       sales/create, sales/list, sales/void, receive, suggestions, save-draft,
+       pin-login, admin-login, admin-finalize, clock-in, clock-out, pending.
+       Found + fixed 2 real parity divergences (dev side):
+       - suggestions 7-day sales aggregated by plu_name (vc used plu_id);
+         dev now keys by plu_id (select plu_id + salesMap by sp.plu_id).
+       - receive no-op response shape: dev returned received_by:null; now
+         matches vc { success, status, ...(receiver ? {received_by} : {}) }.
+       All remaining diffs are formatting-only (multi-line chains vs inline,
+       round3 helper vs inline Math.round(*1000)/1000, req.query local vars).
+[x] 6.2 npx tsc -b + npm run build
+       DONE 2026-08-20: both green after 6.1 fixes (tsc exit 0, build 269ms).
+[x] 6.3 Rerun/expand smoke suite (st-phase6-regression.mjs) for changed flows;
+       re-verify DEV + PROD (28/28 both).
+       DONE 2026-08-20: suite committed at repo root; covers D8 throttle
+       isolation (value-hash, same-length isolation, no length keys), weighted
+       sale deduct (0.5kg -> 3dp) + void restore, D7 cash matrix (short/
+       missing/non-cash 400s, cash_given+change_due persisted), D6 PO business
+       dates (backdated delivered_date, real received_at audit, future 400,
+       over-receive 400), fractional receive increment (existing-row).
+       DEV 28/28 (localhost:5174), PROD 28/28 (new-sales-system-rho.vercel.app,
+       deployed from commit c3c73d4). Test sales voided; POs left as evidence
+       (DEV PO 01a20a0d / PROD PO 267191f2, partially_received, delivered 08-12).
+[x] 6.4 Close out this plan + update 20260811Plan.txt items.
+       DONE 2026-08-20: this plan fully closed. 20260811Plan.txt updated
+       (Phase 5/6 marks + deploy note); commit c3c73d4 records D6/D7/D8 +
+       weighted items + parity; FULL_PLAN.md already marked stale (1.3).
 
 ================================================================================
 OPEN DECISIONS (needed before Phase 5 implementation)
@@ -202,3 +225,11 @@ RELEVANT DEFERRED ITEMS / CONTEXT (from 20260811_smoke_report.md)
   New migrations 009/010/011 created in Phases 3/4/5.
 
 (End of file)
+
+================================================================================
+CLOSED 2026-08-20 — all phases [x]. Deployed to PROD as commit c3c73d4.
+  DEV + PROD regression smoke 28/28 (st-phase6-regression.mjs, repo root).
+  Evidence left in tenant: d8tempuser (PIN 123456), POs PO-2026-617493 /
+  PO-2026-649768 / 2 phase-6 POs (partially_received, delivered 2026-08-12),
+  voided test transactions; RIBEYE stock 12.000 at close.
+================================================================================

@@ -178,9 +178,16 @@ PHASE 6 — Full system check (post-deploy verification)
        (vite plugin path unaffected by .js change)
 
 [x] 6.8 Mark 5.3/5.4 [x] once 6.6 passes; record results in plan — DONE
-       2026-08-16 (see smoke report). NOTE: 20260811Plan.txt is historical;
-       outstanding discrepancies (D6/D7/D8, weighted-item stock units) are
-       tracked in implementation_plans/20260816Plan.txt.
+        2026-08-16 (see smoke report). NOTE: 20260811Plan.txt is historical;
+        outstanding discrepancies (D6/D7/D8, weighted-item stock units) are
+        tracked in implementation_plans/20260816Plan.txt.
+
+================================================================================
+CLOSED 2026-08-20 — ALL items [x]. 20260816Plan.txt (D6/D7/D8 + weighted items
+  + parity) fully closed and deployed as commit c3c73d4. DEV + PROD regression
+  smoke 28/28 (st-phase6-regression.mjs, repo root). Full close-out evidence in
+  20260816Plan.txt (Phases 1-6) and smoke_test_results/20260811_smoke_report.md.
+================================================================================
 
 
 ================================================================================
