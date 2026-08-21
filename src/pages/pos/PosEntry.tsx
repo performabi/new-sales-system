@@ -38,10 +38,30 @@ export default function PosEntry() {
   useEffect(() => {
     const existingStoreId = sessionStorage.getItem('pos_store_id');
     if (existingStoreId) {
-      const slug = sessionStorage.getItem('pos_tenant_slug') || 'store';
+      const rawSlug = sessionStorage.getItem('pos_tenant_slug');
       const storeName = sessionStorage.getItem('pos_store_name');
       const storeRef = storeName ? slugifyPos(storeName) : (sessionStorage.getItem('pos_store_number') || existingStoreId.slice(0, 8));
-      navigate(`/pos/${encodeURIComponent(slug)}/${encodeURIComponent(storeRef)}/dashboard`, { replace: true });
+      let slug = rawSlug && rawSlug !== 'store' ? rawSlug : null;
+      if (slug) {
+        navigate(`/pos/${encodeURIComponent(slug)}/${encodeURIComponent(storeRef)}/dashboard`, { replace: true });
+        return;
+      }
+      const schema = sessionStorage.getItem('pos_tenant_schema');
+      if (schema) {
+        fetch(`/api/app/tenant-info?tenant_schema=${encodeURIComponent(schema)}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((t) => {
+            if (t?.slug) {
+              sessionStorage.setItem('pos_tenant_slug', t.slug);
+              navigate(`/pos/${encodeURIComponent(t.slug)}/${encodeURIComponent(storeRef)}/dashboard`, { replace: true });
+            } else {
+              navigate('/pos/access', { replace: true });
+            }
+          })
+          .catch(() => navigate('/pos/access', { replace: true }));
+        return;
+      }
+      navigate('/pos/access', { replace: true });
     }
   }, [navigate]);
 

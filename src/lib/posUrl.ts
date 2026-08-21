@@ -1,5 +1,7 @@
 export function getPosTenantSlug(): string | null {
-  return sessionStorage.getItem('pos_tenant_slug');
+  const v = sessionStorage.getItem('pos_tenant_slug');
+  if (!v || v === 'store') return null;
+  return v;
 }
 
 export function getPosStoreNumber(): string | null {
@@ -32,7 +34,9 @@ export function getPosStoreNameSlug(): string | null {
 }
 
 export function buildPosUrl(slug: string | null, storename: string | null, suffix: string): string {
-  const s = slug || getPosTenantSlug() || 'store';
+  const rawSlug = slug && slug !== 'store' ? slug : null;
+  const s = rawSlug || getPosTenantSlug();
+  if (!s) return '/pos/access';
   let r = storename;
   if (!r) r = getPosStoreRef();
   else if (/\s/.test(r)) r = slugify(r);

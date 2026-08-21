@@ -50,14 +50,38 @@ export default function TerminalLayout() {
       navigate('/pos/select-store', { replace: true });
       return;
     }
-    const slug = sessionStorage.getItem('pos_tenant_slug');
+    const rawSlug = sessionStorage.getItem('pos_tenant_slug');
+    const slug = rawSlug && rawSlug !== 'store' ? rawSlug : null;
     const storeName = sessionStorage.getItem('pos_store_name') || '';
     const expectedStorename = storeName ? slugify(storeName) : (sessionStorage.getItem('pos_store_number') || id.slice(0, 8));
+    // Stale slug 'store' in session -> fetch real slug via schema then redirect
+    if (!slug) {
+      const schema = sessionStorage.getItem('pos_tenant_schema');
+      if (schema) {
+        fetch(`/api/app/tenant-info?tenant_schema=${encodeURIComponent(schema)}`)
+          .then((r) => (r.ok ? r.json() : null))
+          .then((t) => {
+            if (t?.slug) {
+              sessionStorage.setItem('pos_tenant_slug', t.slug);
+              const suffix = location.pathname.replace(/^\/pos/, '') || '/dashboard';
+              const canonicalSuffix = rawStoreParam ? location.pathname.replace(new RegExp(`^/pos/${slugParam || 'store'}/${rawStoreParam || ''}`), '') : suffix;
+              navigate(`/pos/${encodeURIComponent(t.slug)}/${encodeURIComponent(expectedStorename)}${canonicalSuffix || '/dashboard'}`, { replace: true });
+            }
+          })
+          .catch(() => {});
+        document.title = `Terminal — ${getPosStoreName()}`;
+        return;
+      }
+    }
     // Legacy URL without slug/storename -> redirect to canonical
-    if (!slugParam || !rawStoreParam) {
+    if (!slugParam || !rawStoreParam || slugParam === 'store') {
       const suffix = location.pathname.replace(/^\/pos/, '') || '/dashboard';
       if (slug && expectedStorename) {
         navigate(`/pos/${encodeURIComponent(slug)}/${encodeURIComponent(expectedStorename)}${suffix}`, { replace: true });
+      } else if (rawStoreParam === 'store' && expectedStorename) {
+        // handle stale /pos/store/... URL
+        const legacySuffix = location.pathname.replace(new RegExp(`^/pos/${slugParam}/${rawStoreParam}`), '') || '/dashboard';
+        if (slug) navigate(`/pos/${encodeURIComponent(slug)}/${encodeURIComponent(expectedStorename)}${legacySuffix}`, { replace: true });
       }
       document.title = `Terminal — ${getPosStoreName()}`;
       return;
@@ -91,15 +115,17 @@ export default function TerminalLayout() {
   if (!storeId) return null;
 
   const storeName = getPosStoreName();
-  const slug = sessionStorage.getItem('pos_tenant_slug') || (params as any)?.slug || '';
+  const rawSlug = sessionStorage.getItem('pos_tenant_slug');
+  const slug = rawSlug && rawSlug !== 'store' ? rawSlug : ((params as any)?.slug && (params as any)?.slug !== 'store' ? (params as any)?.slug : '');
   const storeRefDisplay = storeName !== 'Store' ? slugify(storeName) : (sessionStorage.getItem('pos_store_number') || storeId.slice(0, 8));
   const isTillPage = location.pathname.endsWith('/till');
 
   const posNavPath = (path: string) => {
     const suffix = path.replace(/^\/pos/, '') || '/dashboard';
-    const s = sessionStorage.getItem('pos_tenant_slug') || (params as any)?.slug || '';
+    const rawS = sessionStorage.getItem('pos_tenant_slug');
+    const s = rawS && rawS !== 'store' ? rawS : ((params as any)?.slug && (params as any)?.slug !== 'store' ? (params as any)?.slug : '');
     const r = storeName !== 'Store' ? slugify(storeName) : (sessionStorage.getItem('pos_store_number') || storeId.slice(0, 8));
-    if (!s || !r) return path;
+    if (!s || !r || s === 'store') return path;
     return buildPosUrl(s, r, suffix);
   };
 
