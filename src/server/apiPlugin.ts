@@ -17,6 +17,7 @@ import {
   requestIp,
   type AuthEnv,
 } from './apiAuth';
+import { round2, round3 } from '../lib/math';
 
 let currentSchema: string | undefined;
 
@@ -2222,9 +2223,6 @@ export function apiPlugin(): Plugin {
           const { data: store } = await supabaseAdmin.from('stores').select('store_id, store_number').eq('store_id', store_id).maybeSingle();
           if (!store) return res.status(400).json({ error: 'Store not found in this tenant' });
 
-          const round2 = (n: number) => Math.round(n * 100) / 100;
-          const round3 = (n: number) => Math.round(n * 1000) / 1000;
-
           // Server-side price validation: every line must match the PLU's configured price
           const pluIds = [...new Set(items.map((i: any) => i.plu_id))];
           const { data: pluRows } = await supabaseAdmin.from('plu').select('*').in('plu_id', pluIds);
@@ -2238,6 +2236,14 @@ export function apiPlugin(): Plugin {
             const expected = storePrice > 0 ? storePrice : Number(plu.headoffice_price ?? 0);
             if (round2(Number(item.unit_price)) !== round2(expected)) {
               return res.status(400).json({ error: `Price mismatch for ${item.plu_name}: expected ${expected}` });
+            }
+            // Validate line item total matches qty × unit_price
+            const expectedLineTotal = round2(Number(item.quantity) * Number(item.unit_price));
+            const sentLineTotal = round2(Number(item.total_price));
+            if (sentLineTotal !== expectedLineTotal) {
+              return res.status(400).json({
+                error: `Line total mismatch for ${item.plu_name}: sent ${sentLineTotal}, expected ${expectedLineTotal} (qty: ${item.quantity} × unit_price: ${item.unit_price})`
+              });
             }
           }
 
@@ -2254,11 +2260,27 @@ export function apiPlugin(): Plugin {
           }
 
           // Compute totals server-side (round to 2dp)
-          const computedTotal = round2(items.reduce((sum: number, i: any) => sum + round2(i.quantity * i.unit_price), 0));
-          const discount = Math.min(round2(Number(discount_amount) || 0), computedTotal);
-          const total = round2(computedTotal - discount);
-          if (Number(total_amount) !== total) {
-            return res.status(400).json({ error: 'total_amount does not match computed total' });
+          const lineTotals = items.map((i: any) => round2(Number(i.quantity) * Number(i.unit_price)));
+          const computedSubtotal = round2(lineTotals.reduce((sum: number, v: number) => sum + v, 0));
+          const discount = Math.min(round2(Number(discount_amount) || 0), computedSubtotal);
+          const computedTotal = round2(computedSubtotal - discount);
+          if (Number(total_amount) !== computedTotal) {
+            return res.status(400).json({
+              error: 'Total amount mismatch',
+              detail: {
+                clientTotal: Number(total_amount),
+                serverTotal: computedTotal,
+                subtotal: computedSubtotal,
+                discount,
+                lineItems: items.map((i: any) => ({
+                  pluName: i.plu_name,
+                  qty: i.quantity,
+                  unitPrice: i.unit_price,
+                  sentLineTotal: round2(Number(i.total_price)),
+                  expectedLineTotal: round2(Number(i.quantity) * Number(i.unit_price))
+                }))
+              }
+            });
           }
           if (discount > 0 && !loyalty_card_id) {
             return res.status(400).json({ error: 'Discount requires a loyalty card' });
@@ -2269,22 +2291,22 @@ export function apiPlugin(): Plugin {
           if (payment_method === 'cash' && effectiveCashGiven == null) {
             return res.status(400).json({ error: 'cash_given is required for cash payments' });
           }
-          if (effectiveCashGiven != null && effectiveCashGiven < total - 1e-9) {
+          if (effectiveCashGiven != null && effectiveCashGiven < computedTotal - 1e-9) {
             return res.status(400).json({ error: 'cash_given must be at least the total due' });
           }
-          const changeDue = effectiveCashGiven != null ? round2(effectiveCashGiven - total) : null;
+          const changeDue = effectiveCashGiven != null ? round2(effectiveCashGiven - computedTotal) : null;
 
           // Resolve cashback percent (persist with the transaction for accurate voiding)
           const { data: settings } = await supabaseAdmin.from('system_settings')
             .select('value').eq('key', 'loyalty_cashback_percent').maybeSingle();
           const percent = settings?.value?.percent ?? 0;
-          const cashbackEarned = loyalty_card_id && percent > 0 ? round2((total * percent) / 100) : 0;
+          const cashbackEarned = loyalty_card_id && percent > 0 ? round2((computedTotal * percent) / 100) : 0;
 
           // Create transaction
           const { data: transaction, error: txErr } = await supabaseAdmin.from('sales_transactions').insert({
             store_id,
             staff_user_id: effectiveStaffId,
-            total_amount: total,
+            total_amount: computedTotal,
             discount_amount: discount,
             payment_method,
             payment_note: payment_note || null,
@@ -2626,6 +2648,107 @@ export function apiPlugin(): Plugin {
           if (error) return res.status(500).json({ error: error.message });
           return res.json(data || []);
         } catch (err) {
+          return res.status(500).json({ error: 'Internal server error' });
+        }
+      });
+
+      // ---- Reports: list ----
+      app.get('/api/reports/list', async (_req, res) => {
+        try {
+          const { REPORTS } = await import('../lib/reports');
+          return res.json(REPORTS);
+        } catch (err) {
+          console.error('Reports list error:', err);
+          return res.status(500).json({ error: 'Internal server error' });
+        }
+      });
+
+      // ---- Reports: Sales Summary ----
+      app.get('/api/reports/sales-summary', async (req, res) => {
+        try {
+          const format = (req.query.format as string) || 'html';
+          const storeId = req.query.store_id as string;
+          const dateFrom = (req.query.date_from as string) || '';
+          const dateTo = (req.query.date_to as string) || '';
+
+          const supabaseAdmin = getSupabaseAdmin(server);
+          let query = supabaseAdmin
+            .from('sales_transactions')
+            .select('*, sale_items(*)')
+            .eq('status', 'completed');
+
+          if (storeId) query = query.eq('store_id', storeId);
+          if (dateFrom) query = query.gte('created_at', dateFrom);
+          if (dateTo) query = query.lte('created_at', dateTo + 'T23:59:59.999Z');
+
+          const { data: transactions, error } = await query;
+          if (error) return res.status(400).json({ error: error.message });
+
+          const txns = transactions ?? [];
+          let totalRevenue = 0;
+          let txnCount = 0;
+          let totalDiscount = 0;
+          let voidCount = 0;
+          const daily: Record<string, { revenue: number; count: number }> = {};
+
+          for (const tx of txns) {
+            if (tx.status === 'void') {
+              voidCount++;
+              continue;
+            }
+            const amount = Number(tx.total_amount) || 0;
+            const discount = Number(tx.discount_amount) || 0;
+            const created = new Date(tx.created_at).toISOString().slice(0, 10);
+            totalRevenue += amount;
+            totalDiscount += discount;
+            txnCount++;
+            if (!daily[created]) daily[created] = { revenue: 0, count: 0 };
+            daily[created].revenue += amount;
+            daily[created].count++;
+          }
+
+          const avgTicket = txnCount > 0 ? totalRevenue / txnCount : 0;
+
+          const data = {
+            summary: {
+              total_revenue: round2(totalRevenue),
+              transaction_count: txnCount,
+              average_ticket: round2(avgTicket),
+              total_discount: round2(totalDiscount),
+              void_count: voidCount,
+            },
+            daily: Object.entries(daily)
+              .sort(([a], [b]) => a.localeCompare(b))
+              .map(([date, vals]) => ({
+                date,
+                revenue: round2(vals.revenue),
+                transactions: vals.count,
+              })),
+          };
+
+          if (format === 'csv') {
+            const csv = [
+              'Metric,Value',
+              `Total Revenue,${data.summary.total_revenue}`,
+              `Transaction Count,${data.summary.transaction_count}`,
+              `Average Ticket,${data.summary.average_ticket}`,
+              `Total Discount,${data.summary.total_discount}`,
+              `Void Count,${data.summary.void_count}`,
+              '',
+              'Date,Revenue,Transactions',
+              ...data.daily.map((d) => `${d.date},${d.revenue},${d.transactions}`),
+            ].join('\n');
+            return res
+              .set({
+                'Content-Type': 'text/csv',
+                'Content-Disposition': 'attachment; filename=sales-summary.csv',
+              })
+              .send(csv);
+          }
+
+          return res.json({ data, columns: Object.keys(data.summary) });
+        } catch (err) {
+          console.error('Sales summary report error:', err);
           return res.status(500).json({ error: 'Internal server error' });
         }
       });

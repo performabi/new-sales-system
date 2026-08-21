@@ -1,0 +1,206 @@
+================================================================================
+2026-08-22 IMPLEMENTATION PLAN — Dashboard & Reporting Sections
+================================================================================
+
+Status legend: [ ] = not started   [~] = in progress   [x] = done   [!] = blocked
+
+===============================================================================
+SYSTEM ANALYSIS — Entrepreneur Queries Addressed
+===============================================================================
+
+The system supports three main areas:
+1. POS Terminal (/pos/*) — PIN login, till, transactions, clock, checklists, goods-in
+2. Head Office (/app/:slug/*) — Dashboard, sales, PLU, stores, users, suppliers, categories, 
+   item sizing, POs, devices, loyalty, notifications, logbook
+3. Platform Admin (/admin/*) — Tenants, plans, super users, settings
+
+Entrepreneur queries addressed by this plan:
+- "How much did we sell today/this week/this month?" → Dashboard Revenue card
+- "Which products sell best?" → Report 2 (Sales by PLU)
+- "What's our payment method split?" → Dashboard Payment Split card
+- "Which store performs best?" → Report 4 (Sales by Store - not in initial 10)
+- "What needs restocking?" → Dashboard Low Stock alert + Report 6 (Stock)
+- "Are POs arriving on time?" → Report 4 (Purchase Orders)
+- "Is loyalty driving repeat business?" → Report 3 (Loyalty Performance)
+- "Are staff clocking in/out properly?" → Report 5 (Timesheets)
+- "What's our cost of goods sold?" → Report 7 (COGS)
+- "What goods came in?" → Report 8 (Goods In)
+- "Can I export data for accounting/board?" → CSV + PDF exports on all reports
+- "What PLUs do we have?" → Report 9 (PLU Master List)
+- "Who are our users and stores?" → Report 10 (Users & Stores List)
+
+===============================================================================
+DASHBOARD DESIGN — Aggregated Highlights Only
+===============================================================================
+
+Hero Section (Filtering):
+- Date Range: Today / 7 Days / 30 Days / Custom (date pickers)
+- Store Filter: Dropdown (All Stores + individual stores)
+- Refresh Button: Manual data refresh
+- Export Quick Actions: CSV / PDF buttons
+
+Aggregated Highlights (5 Cards):
+1. Revenue Today: Sum total_amount for today (business date)
+2. Transactions Today: Count for today
+3. Average Ticket: Revenue / Transactions today
+4. Payment Split: Cash/Card/Contactless/Transfer % + amounts
+5. Key Alerts: Low stock count + open clock-in sessions
+
+===============================================================================
+REPORTS SECTION — /app/:slug/Reporting/Reports
+===============================================================================
+
+Hero Section:
+- Report Type Selector: Dropdown (10 initial reports)
+- Date Range: Today / 7 Days / 30 Days / Custom
+- Store Filter: All Stores + individual stores
+- Format Selector: HTML / CSV / PDF
+- Apply / Export Buttons
+
+10 Initial Reports (Read-Only, Aggregation Only):
+
+1. Sales Summary
+   Data: sales_transactions + sale_items
+   Aggregations: Total revenue, txn count, avg ticket, discounts, refunds, voids
+   Grouping: By day/week/month
+
+2. Sales by PLU
+   Data: sale_items + plu
+   Aggregations: Quantity, revenue, discount % per PLU; top/bottom performers
+
+3. Loyalty Performance
+   Data: loyalty_cards + sales_transactions
+   Aggregations: Cards issued, active cards, cashback earned/used/redeemed, discount totals
+
+4. Purchase Orders
+   Data: purchase_orders + po_items + suppliers
+   Aggregations: PO status (draft/ordered/partially_received/received), quantities ordered vs received, supplier performance (on-time %)
+
+5. Timesheets (Clock In/Out)
+   Data: staff_timesheets + users
+   Aggregations: Clock-in/out times, hours worked, overtime, missing punches, late/early flags
+
+6. Stock / Inventory
+   Data: inventory + plu
+   Aggregations: Current stock, threshold, value (stock × cost), low-stock flag, stock movement
+
+7. COGS Report
+   Data: sale_items + inventory + purchase_orders
+   Aggregations: COGS = SUM(quantity × cost_per_unit) per PLU; Gross Margin = Revenue - COGS; Margin %
+
+8. Goods In (Receiving)
+   Data: purchase_orders + po_items + inventory
+   Aggregations: Received quantities, received date, receiver, PO status, discrepancies
+
+9. Lists — PLU Master
+   Data: plu + plu_categories
+   Fields: PLU ID, name, category, EAN, uses_scale, head-office price, per-store prices, active flag
+
+10. Lists — Users & Stores
+    Data: users + stores
+    Fields: User: name, role, PIN status, assigned store, active; Store: name, address, active
+
+===============================================================================
+TECHNICAL SPECIFICATIONS
+===============================================================================
+
+Data Access: Read-Only
+- No API breaking changes — only new GET endpoints under /api/reports/*
+- Server-side aggregation: SQL GROUP BY, SUM, COUNT, AVG, JOINs
+- No writes: no INSERT, UPDATE, DELETE in report endpoints
+- Tenant isolation: all queries scoped to tenant_schema via existing middleware
+
+API Endpoints (BOTH server copies: apiPlugin.ts + api/[...path].ts):
+GET /api/reports/list → [{ id, title, description, category }]
+GET /api/reports/sales-summary?store_id=&date_from=&date_to=&format=html|csv|pdf
+GET /api/reports/sales-by-plu?store_id=&date_from=&date_to=&format=html|csv|pdf
+GET /api/reports/loyalty?store_id=&date_from=&date_to=&format=html|csv|pdf
+GET /api/reports/purchase-orders?store_id=&date_from=&date_to=&format=html|csv|pdf
+GET /api/reports/timesheets?store_id=&date_from=&date_to=&format=html|csv|pdf
+GET /api/reports/stock?store_id=&date_from=&date_to=&format=html|csv|pdf
+GET /api/reports/cogs?store_id=&date_from=&date_to=&format=html|csv|pdf
+GET /api/reports/goods-in?store_id=&date_from=&date_to=&format=html|csv|pdf
+GET /api/reports/lists/plu?store_id=
+GET /api/reports/lists/users-stores?store_id=
+
+Output Formats:
+- HTML: Interactive view with sortable/filterable/paginated tables
+- CSV: json2csv — proper escaping, headers, UTF-8
+- PDF: pdfmake/html2pdf — logo, title, period, summary, charts, tables, footer
+
+===============================================================================
+PHASES
+===============================================================================
+
+PHASE 1 — Reports Page + Hero + Core 3 Reports (Sales Summary, Sales by PLU, Loyalty)
+[ ] P1.1 Create /app/:slug/Reporting/Reports page with hero section
+[ ] P1.2 Report list component with 10 report cards
+[ ] P1.3 API endpoints for 3 core reports (sales-summary, sales-by-plu, loyalty)
+[ ] P1.4 HTML view with sortable/filterable tables
+[ ] P1.5 CSV export for 3 reports
+[ ] GATE: All 3 reports render HTML + CSV; tsc + build green
+
+PHASE 2 — Remaining 7 Reports + PDF Export
+[ ] P2.1 API endpoints for 7 remaining reports (PO, Timesheets, Stock, COGS, Goods In, PLU List, Users-Stores List)
+[ ] P2.2 PDF export with pdfmake (logo, title, period, summary, charts, tables)
+[ ] P2.3 HTML view enhancements (sorting, filtering, pagination)
+[ ] GATE: All 10 reports render HTML + CSV + PDF; tsc + build green
+
+PHASE 3 — Dashboard Highlights
+[ ] P3.1 Refactor /app/:slug/dashboard → 5 highlight cards + hero section
+[ ] P3.2 Dashboard API endpoint (/api/dashboard/stats)
+[ ] GATE: Dashboard loads with aggregated data; hero filters work
+
+PHASE 4 — Polish & Integration
+[ ] P4.1 Dashboard → Reports navigation (click metric → pre-filtered report)
+[ ] P4.2 Hero filtering on both pages
+[ ] P4.3 Loading states, error boundaries, responsive design
+[ ] P4.4 Print CSS for PDF (@page margins, page-break-inside)
+[ ] GATE: All builds green; Vercel deploys clean
+
+===============================================================================
+DATA SOURCE MAPPING (Read-Only)
+===============================================================================
+
+| Report | Tables | Key Fields |
+|--------|--------|------------|
+| Sales Summary | sales_transactions, sale_items | total_amount, discount_amount, payment_method, created_at |
+| Sales by PLU | sale_items, plu | plu_id, plu_name, quantity, unit_price, total_price, discount_amount |
+| Loyalty | loyalty_cards, sales_transactions | card_number, cashback_balance, cashback_earned, discount_applied |
+| Purchase Orders | purchase_orders, po_items, suppliers | po_number, status, quantity_ordered, quantity_received, supplier_name |
+| Timesheets | staff_timesheets, users | clock_in, clock_out, user_id, store_id |
+| Stock | inventory, plu | stock_quantity, threshold, cost_per_unit, plu_name |
+| COGS | sale_items, inventory, purchase_orders | quantity, unit_price, cost_per_unit (from latest PO) |
+| Goods In | purchase_orders, po_items, inventory | quantity_received, received_date, received_by |
+| PLU List | plu, plu_categories | plu_id, name, category_id, ean, uses_scale, headoffice_price, store_* prices |
+| Users & Stores | users, stores | name, role, pin_hash, assigned_store_id, store_name, address |
+
+===============================================================================
+COGS CALCULATION NOTE
+===============================================================================
+
+Cost per unit source: Latest purchase_order_item.unit_cost for each PLU (weighted average if multiple recent POs)
+Gross Margin = Revenue - COGS; Margin % = (Revenue - COGS) / Revenue * 100
+
+===============================================================================
+PDF TEMPLATE STRUCTURE
+===============================================================================
+
+- Header: Company logo (placeholder), Report title, Period
+- Summary Box: Key metrics (cards)
+- Charts: Revenue trend (bar), Payment distribution (pie) — where applicable
+- Data Table: Formatted with headers, alternating rows, totals row
+- Footer: Page numbers, generation timestamp, company name
+
+===============================================================================
+GATES
+===============================================================================
+
+All phases: npx tsc -b + npm run build must pass
+No breaking changes to existing APIs
+All queries tenant-isolated via existing middleware
+Vercel auto-deploy on main branch push
+
+===============================================================================
+END OF PLAN
+================================================================================

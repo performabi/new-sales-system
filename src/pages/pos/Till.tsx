@@ -4,6 +4,7 @@ import { useAppStore } from '../../store/appStore';
 import { apiFetch } from '../../lib/api';
 import { deviceManager } from '../../devices/DeviceManager';
 import { buildReceiptLines } from '../../devices/escpos';
+import { round2, qtyPriceTotal, moneySum } from '../../lib/math';
 import CategoryBar from '../../components/Pos/CategoryBar';
 import PluGrid from '../../components/Pos/PluGrid';
 import ScanInput from '../../components/Pos/ScanInput';
@@ -167,8 +168,9 @@ export default function Till() {
   const handlePay = async (method: string, note?: string, amountTendered?: number) => {
     const tab = basketTabs.find((t) => t.tabId === activeTabId);
     if (!tab) return;
-    const subtotal = tab.items.reduce((sum: number, i: any) => sum + i.unit_price * i.quantity, 0);
-    const total = Math.max(0, subtotal - (tab.discount || 0));
+    const subtotal = moneySum(tab.items.map((i: any) => qtyPriceTotal(i.quantity, i.unit_price)));
+    const discount = round2(tab.discount || 0);
+    const total = Math.max(0, round2(subtotal - discount));
 
     const result = await createSale({
       store_id: storeId,
@@ -179,10 +181,10 @@ export default function Till() {
         plu_name: i.name,
         quantity: i.quantity,
         unit_price: i.unit_price,
-        total_price: i.unit_price * i.quantity,
+        total_price: qtyPriceTotal(i.quantity, i.unit_price),
       })),
-      total_amount: total,
-      discount_amount: tab.discount || 0,
+      total_amount: round2(total),
+      discount_amount: discount,
       payment_method: method,
       payment_note: note || '',
       loyalty_card_id: tab.loyaltyCardId,
