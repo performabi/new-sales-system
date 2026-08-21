@@ -1583,7 +1583,7 @@ return res.json({ success: true, status: newStatus, delivered_date: effectiveDel
       return res.json(data);
     }
 
-    // ---- Reports: list ----
+    // ---- Reports: list ---- // 2026-08-22 force Vercel rebuild — timesheets + users-stores live
     if (path[0] === 'reports' && path[1] === 'list' && method === 'GET') {
       const REPORTS = [
         { id: 'sales-summary', title: 'Sales Summary', description: 'Total revenue, transactions, average ticket, discounts, refunds, voids grouped by day/week/month', category: 'Sales' },
@@ -1787,7 +1787,7 @@ return res.json({ success: true, status: newStatus, delivered_date: effectiveDel
         const storeId = (req.query as any).store_id as string;
         const dateFrom = (req.query as any).date_from as string || '';
         const dateTo = (req.query as any).date_to as string || '';
-        let q = supabaseAdmin.from('staff_timesheets').select('timesheet_id, clock_in, clock_out, store_id, user_id, users!inner(full_name), stores(name)').order('clock_in', { ascending: false });
+        let q = supabaseAdmin.from('staff_timesheets').select('timesheet_id, clock_in, clock_out, store_id, user_id, users(full_name), stores(name)').order('clock_in', { ascending: false });
         if (storeId) q = (q as any).eq('store_id', storeId);
         if (dateFrom) q = (q as any).gte('clock_in', dateFrom + 'T00:00:00Z');
         if (dateTo) q = (q as any).lte('clock_in', dateTo + 'T23:59:59.999Z');
