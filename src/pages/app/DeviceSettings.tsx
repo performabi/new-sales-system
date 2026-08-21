@@ -15,6 +15,7 @@ export default function DeviceSettings() {
   const [rawDebug, setRawDebug] = useState<string>('');
   const [debugActive, setDebugActive] = useState(false);
   const debugTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const isMounted = useRef(true);
 
   useEffect(() => {
     fetchStores();
@@ -22,24 +23,22 @@ export default function DeviceSettings() {
 
   useEffect(() => {
     syncStatus();
-    const t = setInterval(syncStatus, 3000);
-    return () => clearInterval(t);
   }, [syncStatus]);
 
   useEffect(() => {
-    if (stores.length > 0 && !selectedStoreId) {
+    if (stores.length > 0 && !selectedStoreId && isMounted.current) {
       setSelectedStoreId(stores[0].store_id);
     }
-  }, [stores, selectedStoreId]);
+  }, [stores, selectedStoreId, isMounted]);
 
   useEffect(() => {
-    if (selectedStoreId) {
+    if (isMounted.current && selectedStoreId) {
       fetchDeviceConfig(selectedStoreId);
     }
-  }, [selectedStoreId, fetchDeviceConfig]);
+  }, [selectedStoreId, fetchDeviceConfig, isMounted]);
 
   useEffect(() => {
-    if (deviceConfig && deviceConfigStoreId === selectedStoreId) {
+    if (isMounted.current && deviceConfig && deviceConfigStoreId === selectedStoreId) {
       const normalized = normalizeDeviceConfig(deviceConfig);
       setConfig(normalized);
       deviceManager.applyConfig(normalized);
@@ -47,6 +46,7 @@ export default function DeviceSettings() {
   }, [deviceConfig, deviceConfigStoreId, selectedStoreId]);
 
   useEffect(() => () => {
+    isMounted.current = false;
     if (debugTimer.current) clearInterval(debugTimer.current);
   }, []);
 

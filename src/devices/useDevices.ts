@@ -13,7 +13,7 @@ export function useDevices() {
     printer: deviceManager.getPrinter(),
     drawer: deviceManager.getDrawer(),
     terminal: deviceManager.getTerminal(),
-    syncStatus: () => deviceManager.syncStatus(),
+    syncStatus: () => deviceManager.syncStatus(true),
   };
 }
 

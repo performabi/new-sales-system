@@ -78,15 +78,17 @@ class DeviceManager {
   }
 
   /** Poll simulators (scale) and surface connection state to subscribers. */
-  syncStatus() {
+  syncStatus(skipUpdate = false) {
     const scale = this.scale.isConnected ? this.scale.isConnected() : false;
     const printerConnected = this.printer.getStatus ? this.printer.getStatus() === 'ready' : false;
     const drawerConnected = this.drawer.isOpen ? this.drawer.isOpen() : false;
-    this.update({
-      scaleConnected: scale,
-      printerConnected,
-      drawerConnected,
-    });
+    if (!skipUpdate) {
+      this.update({
+        scaleConnected: scale,
+        printerConnected,
+        drawerConnected,
+      });
+    }
   }
 
   /** Apply per-store device config: swaps in real drivers when enabled, else falls back to simulators. */
