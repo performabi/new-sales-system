@@ -142,10 +142,10 @@ PHASE 1 — Reports Page + Hero + Core 3 Reports (Sales Summary, Sales by PLU, L
 [x] GATE: All 3 reports render HTML + CSV; tsc + build green — tsc -b green, vite build 776kB green (2026-08-21)
 
 PHASE 2 — Remaining 7 Reports + PDF Export
-[ ] P2.1 API endpoints for 7 remaining reports (PO, Timesheets, Stock, COGS, Goods In, PLU List, Users-Stores List)
-[ ] P2.2 PDF export with pdfmake (logo, title, period, summary, charts, tables)
+[x] P2.1 API endpoints for 7 remaining reports (PO, Timesheets, Stock, COGS, Goods In, PLU List, Users-Stores List) — DONE (both server copies, html+csv, FIFO via src/lib/fifo.ts, break 30m>6h/15m>4h, 2026-08-21)
+[ ] P2.2 PDF export with pdfmake (logo, title, period, summary, charts, tables) — stub 501
 [ ] P2.3 HTML view enhancements (sorting, filtering, pagination)
-[ ] GATE: All 10 reports render HTML + CSV + PDF; tsc + build green
+[ ] GATE: All 10 reports render HTML + CSV + PDF; tsc + build green — html+csv done, pdf pending
 
 PHASE 3 — Dashboard Highlights
 [~] P3.1 Refactor /app/:slug/dashboard → 5 highlight cards + hero section — PARTIAL: Payment Split card added (client memo from /api/sales), hero now Today/7/15/30/Custom

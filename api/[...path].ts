@@ -1760,6 +1760,174 @@ return res.json({ success: true, status: newStatus, delivered_date: effectiveDel
       }
     }
 
+    // ---- Reports: purchase-orders ----
+    if (path[0] === 'reports' && path[1] === 'purchase-orders' && method === 'GET') {
+      try {
+        const format = (req.query as any).format as string || 'html';
+        const storeId = (req.query as any).store_id as string;
+        const dateFrom = (req.query as any).date_from as string || '';
+        const dateTo = (req.query as any).date_to as string || '';
+        let q = supabaseAdmin.from('purchase_orders').select('po_id, po_number, status, total_cost, created_at, delivered_date, received_at, expected_delivery_date, store_id, supplier_id, suppliers(name), stores(name)');
+        if (storeId) q = (q as any).eq('store_id', storeId);
+        if (dateFrom) q = (q as any).gte('created_at', dateFrom + 'T00:00:00Z');
+        if (dateTo) q = (q as any).lte('created_at', dateTo + 'T23:59:59.999Z');
+        const { data, error } = await (q as any).order('created_at', { ascending: false });
+        if (error) return res.status(400).json({ error: error.message });
+        const rows = ((data as any[]) ?? []).map((po: any) => ({ po_number: po.po_number, supplier: po.suppliers?.name || '—', store: po.stores?.name || po.store_id?.slice(0, 8) || '—', status: po.status, total_cost: po.total_cost, expected_delivery: po.expected_delivery_date || '—', delivered_date: po.delivered_date || '—', created_at: po.created_at ? new Date(po.created_at).toISOString().slice(0, 10) : '—' }));
+        if (format === 'csv') { const csv = ['po_number,supplier,store,status,total_cost,expected_delivery,delivered_date,created_at', ...rows.map((r) => `${r.po_number},"${r.supplier}","${r.store}",${r.status},${r.total_cost},${r.expected_delivery},${r.delivered_date},${r.created_at}`)].join('\n'); res.setHeader('Content-Type', 'text/csv'); res.setHeader('Content-Disposition', 'attachment; filename=purchase-orders.csv'); return res.send(csv); }
+        if (format === 'pdf') return res.status(501).json({ error: 'PDF export not yet implemented' });
+        return res.json({ data: rows, columns: ['po_number', 'supplier', 'store', 'status', 'total_cost', 'expected_delivery', 'delivered_date', 'created_at'] });
+      } catch (err) { console.error('purchase-orders report error:', err); return res.status(500).json({ error: 'Internal server error' }); }
+    }
+
+    // ---- Reports: timesheets ----
+    if (path[0] === 'reports' && path[1] === 'timesheets' && method === 'GET') {
+      try {
+        const format = (req.query as any).format as string || 'html';
+        const storeId = (req.query as any).store_id as string;
+        const dateFrom = (req.query as any).date_from as string || '';
+        const dateTo = (req.query as any).date_to as string || '';
+        let q = supabaseAdmin.from('staff_timesheets').select('timesheet_id, clock_in, clock_out, store_id, user_id, users!inner(full_name), stores(name)').order('clock_in', { ascending: false });
+        if (storeId) q = (q as any).eq('store_id', storeId);
+        if (dateFrom) q = (q as any).gte('clock_in', dateFrom + 'T00:00:00Z');
+        if (dateTo) q = (q as any).lte('clock_in', dateTo + 'T23:59:59.999Z');
+        const { data, error } = await q;
+        if (error) return res.status(400).json({ error: error.message });
+        const rows = ((data as any[]) ?? []).map((ts: any) => {
+          const clockIn = ts.clock_in ? new Date(ts.clock_in) : null;
+          const clockOut = ts.clock_out ? new Date(ts.clock_out) : null;
+          let hours: number | string = '—'; let breakMins = 0; let overtime = 0; let flag = '';
+          if (clockIn && clockOut) { const grossH = (clockOut.getTime() - clockIn.getTime()) / 3600000; if (grossH > 6) breakMins = 30; else if (grossH > 4) breakMins = 15; const netH = Math.max(0, grossH - breakMins / 60); hours = Number(netH.toFixed(2)); overtime = netH > 8 ? Number((netH - 8).toFixed(2)) : 0; } else if (clockIn && !clockOut) flag = 'missing punch';
+          return { date: clockIn ? clockIn.toISOString().slice(0, 10) : '—', user: (ts as any).users?.full_name || ts.user_id?.slice(0, 8) || '—', store: (ts as any).stores?.name || ts.store_id?.slice(0, 8) || '—', clock_in: clockIn ? clockIn.toISOString().slice(0, 19).replace('T', ' ') : '—', clock_out: clockOut ? clockOut.toISOString().slice(0, 19).replace('T', ' ') : '—', break_mins: breakMins, hours, overtime, flag };
+        });
+        if (format === 'csv') { const csv = ['date,user,store,clock_in,clock_out,break_mins,hours,overtime,flag', ...rows.map((r) => `${r.date},"${r.user}","${r.store}",${r.clock_in},${r.clock_out},${r.break_mins},${r.hours},${r.overtime},${r.flag}`)].join('\n'); res.setHeader('Content-Type', 'text/csv'); res.setHeader('Content-Disposition', 'attachment; filename=timesheets.csv'); return res.send(csv); }
+        if (format === 'pdf') return res.status(501).json({ error: 'PDF export not yet implemented' });
+        return res.json({ data: rows, columns: ['date', 'user', 'store', 'clock_in', 'clock_out', 'break_mins', 'hours', 'overtime', 'flag'] });
+      } catch (err) { console.error('timesheets report error:', err); return res.status(500).json({ error: 'Internal server error' }); }
+    }
+
+    // ---- Reports: stock ----
+    if (path[0] === 'reports' && path[1] === 'stock' && method === 'GET') {
+      try {
+        const format = (req.query as any).format as string || 'html';
+        const storeId = (req.query as any).store_id as string;
+        const round2 = (n: number) => Math.round(n * 100) / 100;
+        let q = supabaseAdmin.from('inventory').select('product_id, store_id, plu_id, stock_quantity, price, name, barcode_qr, plu(plu_number, name, uses_scale, ean, plu_categories(name)), stores(name)');
+        if (storeId) q = (q as any).eq('store_id', storeId);
+        const { data, error } = await q;
+        if (error) return res.status(400).json({ error: error.message });
+        const rows = ((data as any[]) ?? []).map((inv: any) => { const pluNum = inv.plu?.plu_number || '—'; const pluName = inv.plu?.name || inv.name || '—'; const category = inv.plu?.plu_categories?.name || 'Uncategorised'; const qty = Number(inv.stock_quantity) || 0; const price = Number(inv.price) || 0; const value = round2(qty * price); const low = qty <= 5; return { plu_number: pluNum, plu_name: pluName, category, store: inv.stores?.name || inv.store_id?.slice(0, 8) || '—', stock_quantity: qty, price, stock_value: value, low_stock: low ? 'YES' : 'NO' }; });
+        if (format === 'csv') { const csv = ['plu_number,plu_name,category,store,stock_quantity,price,stock_value,low_stock', ...rows.map((r) => `${r.plu_number},"${r.plu_name}","${r.category}","${r.store}",${r.stock_quantity},${r.price},${r.stock_value},${r.low_stock}`)].join('\n'); res.setHeader('Content-Type', 'text/csv'); res.setHeader('Content-Disposition', 'attachment; filename=stock.csv'); return res.send(csv); }
+        if (format === 'pdf') return res.status(501).json({ error: 'PDF export not yet implemented' });
+        return res.json({ data: rows, columns: ['plu_number', 'plu_name', 'category', 'store', 'stock_quantity', 'price', 'stock_value', 'low_stock'] });
+      } catch (err) { console.error('stock report error:', err); return res.status(500).json({ error: 'Internal server error' }); }
+    }
+
+    // ---- Reports: cogs (FIFO) ----
+    if (path[0] === 'reports' && path[1] === 'cogs' && method === 'GET') {
+      try {
+        const format = (req.query as any).format as string || 'html';
+        const storeId = (req.query as any).store_id as string;
+        const dateFrom = (req.query as any).date_from as string || '';
+        const dateTo = (req.query as any).date_to as string || '';
+        const round2 = (n: number) => Math.round(n * 100) / 100;
+        const fifoCogs = (layers: Array<{ qty: number; cost: number }>, salesQty: number) => { let rem = salesQty; let cogs = 0; const l = layers.map((x) => ({ ...x })); for (const lay of l) { if (rem <= 0) break; if (lay.qty <= 0) continue; const c = Math.min(lay.qty, rem); cogs += c * lay.cost; lay.qty -= c; rem -= c; } return { cogs: round2(cogs), remaining: l.filter((x) => x.qty > 1e-9) }; };
+        const buildLayers = (items: any[]) => { const m = new Map<string, Array<{ qty: number; cost: number; date: string }>>(); for (const it of items) { if (!it.plu_id || (Number(it.quantity_received) || 0) <= 0) continue; const date = it.purchase_orders?.delivered_date || it.purchase_orders?.received_at || new Date().toISOString(); const arr = m.get(it.plu_id) || []; arr.push({ qty: Number(it.quantity_received), cost: Number(it.cost_price_at_order) || 0, date }); m.set(it.plu_id, arr); } for (const a of m.values()) a.sort((x, y) => new Date(x.date).getTime() - new Date(y.date).getTime()); return m; };
+        let poQ = supabaseAdmin.from('purchase_order_items').select('plu_id, quantity_received, cost_price_at_order, purchase_orders!inner(delivered_date, received_at, status, store_id)');
+        poQ = (poQ as any).in('purchase_orders.status', ['received', 'partially_received']);
+        if (storeId) poQ = (poQ as any).eq('purchase_orders.store_id', storeId);
+        const { data: poItems, error: poErr } = await poQ;
+        if (poErr) return res.status(400).json({ error: poErr.message });
+        const layersMap = buildLayers((poItems as any[]) ?? []);
+        let txQ = supabaseAdmin.from('sales_transactions').select('transaction_id, sale_items(plu_id, plu_name, quantity, total_price)').neq('status', 'void');
+        if (storeId) txQ = (txQ as any).eq('store_id', storeId);
+        if (dateFrom) txQ = (txQ as any).gte('created_at', dateFrom + 'T00:00:00Z');
+        if (dateTo) txQ = (txQ as any).lte('created_at', dateTo + 'T23:59:59.999Z');
+        const { data: txns, error: txErr } = await txQ;
+        if (txErr) return res.status(400).json({ error: txErr.message });
+        const agg = new Map<string, { plu_name: string; qty: number; revenue: number; cogs: number }>();
+        const mutable = new Map<string, Array<{ qty: number; cost: number; date: string }>>();
+        for (const [k, v] of layersMap) mutable.set(k, v.map((l) => ({ ...l })));
+        for (const tx of (txns as any[]) ?? []) {
+          for (const si of (tx as any).sale_items ?? []) {
+            const key = si.plu_id || si.plu_name;
+            const qty = Number(si.quantity) || 0;
+            const rev = Number(si.total_price) || 0;
+            const layers = si.plu_id ? mutable.get(si.plu_id) || [] : [];
+            let cogs = 0;
+            if (layers.length && si.plu_id) { const r = fifoCogs(layers as any, qty); cogs = r.cogs; mutable.set(si.plu_id, r.remaining as any); }
+            const ent = agg.get(key) || { plu_name: si.plu_name, qty: 0, revenue: 0, cogs: 0 };
+            ent.qty += qty; ent.revenue += rev; ent.cogs += cogs; agg.set(key, ent);
+          }
+        }
+        const pluIds = Array.from(agg.keys()).filter((k) => /^[0-9a-f-]{36}$/.test(k));
+        const pluNumMap = new Map<string, string>();
+        if (pluIds.length) { const { data: plus } = await supabaseAdmin.from('plu').select('plu_id, plu_number').in('plu_id', pluIds); for (const p of (plus as any[]) ?? []) pluNumMap.set(p.plu_id, p.plu_number); }
+        const rows = Array.from(agg.entries()).map(([key, v]) => { const margin = round2(v.revenue - v.cogs); const marginPct = v.revenue ? Number(((margin / v.revenue) * 100).toFixed(1)) : 0; return { plu_number: pluNumMap.get(key) || (key.length === 36 ? '—' : key), plu_name: v.plu_name, quantity: Number(v.qty.toFixed(3)), revenue: round2(v.revenue), cogs: round2(v.cogs), margin, margin_pct: marginPct }; }).sort((a, b) => b.revenue - a.revenue);
+        if (format === 'csv') { const csv = ['plu_number,plu_name,quantity,revenue,cogs,margin,margin_pct', ...rows.map((r) => `${r.plu_number},"${r.plu_name}",${r.quantity},${r.revenue},${r.cogs},${r.margin},${r.margin_pct}`)].join('\n'); res.setHeader('Content-Type', 'text/csv'); res.setHeader('Content-Disposition', 'attachment; filename=cogs.csv'); return res.send(csv); }
+        if (format === 'pdf') return res.status(501).json({ error: 'PDF export not yet implemented' });
+        return res.json({ data: rows, columns: ['plu_number', 'plu_name', 'quantity', 'revenue', 'cogs', 'margin', 'margin_pct'] });
+      } catch (err) { console.error('cogs report error:', err); return res.status(500).json({ error: 'Internal server error' }); }
+    }
+
+    // ---- Reports: goods-in ----
+    if (path[0] === 'reports' && path[1] === 'goods-in' && method === 'GET') {
+      try {
+        const format = (req.query as any).format as string || 'html';
+        const storeId = (req.query as any).store_id as string;
+        const dateFrom = (req.query as any).date_from as string || '';
+        const dateTo = (req.query as any).date_to as string || '';
+        let q = supabaseAdmin.from('purchase_orders').select('po_number, status, delivered_date, received_at, stores(name), suppliers(name), purchase_order_items(quantity_ordered, quantity_received, plu(plu_number, name))').in('status', ['received', 'partially_received']);
+        if (storeId) q = (q as any).eq('store_id', storeId);
+        if (dateFrom) q = (q as any).gte('delivered_date', dateFrom);
+        if (dateTo) q = (q as any).lte('delivered_date', dateTo);
+        const { data, error } = await (q as any).order('delivered_date', { ascending: false });
+        if (error) return res.status(400).json({ error: error.message });
+        const rows: any[] = [];
+        for (const po of (data as any[]) ?? []) {
+          for (const poi of po.purchase_order_items ?? []) {
+            const ordered = Number(poi.quantity_ordered) || 0;
+            const received = Number(poi.quantity_received) || 0;
+            rows.push({ po_number: po.po_number, supplier: po.suppliers?.name || '—', store: po.stores?.name || '—', plu_number: poi.plu?.plu_number || '—', plu_name: poi.plu?.name || '—', ordered, received, shortage: Number((ordered - received).toFixed(3)), status: po.status, delivered_date: po.delivered_date || (po.received_at ? new Date(po.received_at).toISOString().slice(0, 10) : '—') });
+          }
+          if (!(po.purchase_order_items ?? []).length) rows.push({ po_number: po.po_number, supplier: po.suppliers?.name || '—', store: po.stores?.name || '—', plu_number: '—', plu_name: '—', ordered: 0, received: 0, shortage: 0, status: po.status, delivered_date: po.delivered_date || '—' });
+        }
+        if (format === 'csv') { const csv = ['po_number,supplier,store,plu_number,plu_name,ordered,received,shortage,status,delivered_date', ...rows.map((r) => `${r.po_number},"${r.supplier}","${r.store}",${r.plu_number},"${r.plu_name}",${r.ordered},${r.received},${r.shortage},${r.status},${r.delivered_date}`)].join('\n'); res.setHeader('Content-Type', 'text/csv'); res.setHeader('Content-Disposition', 'attachment; filename=goods-in.csv'); return res.send(csv); }
+        if (format === 'pdf') return res.status(501).json({ error: 'PDF export not yet implemented' });
+        return res.json({ data: rows, columns: ['po_number', 'supplier', 'store', 'plu_number', 'plu_name', 'ordered', 'received', 'shortage', 'status', 'delivered_date'] });
+      } catch (err) { console.error('goods-in report error:', err); return res.status(500).json({ error: 'Internal server error' }); }
+    }
+
+    // ---- Reports: plu-list ----
+    if (path[0] === 'reports' && path[1] === 'plu-list' && method === 'GET') {
+      try {
+        const format = (req.query as any).format as string || 'html';
+        const { data, error } = await supabaseAdmin.from('plu').select('plu_id, plu_number, name, ean, uses_scale, vat_class, headoffice_price, store_001, store_002, store_003, store_004, store_005, store_006, store_007, store_008, store_009, plu_categories(name)').order('plu_number');
+        if (error) return res.status(400).json({ error: error.message });
+        const rows = ((data as any[]) ?? []).map((p: any) => ({ plu_number: p.plu_number, name: p.name, category: p.plu_categories?.name || 'Uncategorised', ean: p.ean || '—', uses_scale: p.uses_scale ? 'YES' : 'NO', vat_class: p.vat_class, headoffice_price: p.headoffice_price }));
+        if (format === 'csv') { const csv = ['plu_number,name,category,ean,uses_scale,vat_class,headoffice_price', ...rows.map((r) => `${r.plu_number},"${r.name}","${r.category}",${r.ean},${r.uses_scale},${r.vat_class},${r.headoffice_price}`)].join('\n'); res.setHeader('Content-Type', 'text/csv'); res.setHeader('Content-Disposition', 'attachment; filename=plu-list.csv'); return res.send(csv); }
+        if (format === 'pdf') return res.status(501).json({ error: 'PDF export not yet implemented' });
+        return res.json({ data: rows, columns: ['plu_number', 'name', 'category', 'ean', 'uses_scale', 'vat_class', 'headoffice_price'] });
+      } catch (err) { console.error('plu-list report error:', err); return res.status(500).json({ error: 'Internal server error' }); }
+    }
+
+    // ---- Reports: users-stores ----
+    if (path[0] === 'reports' && path[1] === 'users-stores' && method === 'GET') {
+      try {
+        const format = (req.query as any).format as string || 'html';
+        const { data: users, error: uErr } = await supabaseAdmin.from('users').select('user_id, full_name, email, role, pin_hash, is_active, assigned_store_id, stores(name)').order('full_name');
+        if (uErr) return res.status(400).json({ error: uErr.message });
+        const { data: stores, error: sErr } = await supabaseAdmin.from('stores').select('store_id, name, address, is_active').order('name');
+        if (sErr) return res.status(400).json({ error: sErr.message });
+        const userRows = ((users as any[]) ?? []).map((u: any) => ({ type: 'USER', name: u.full_name, email: u.email || '—', role: u.role, pin: u.pin_hash ? 'YES' : 'NO', store: (u as any).stores?.name || u.assigned_store_id?.slice(0, 8) || '—', active: u.is_active ? 'YES' : 'NO' }));
+        const storeRows = ((stores as any[]) ?? []).map((s: any) => ({ type: 'STORE', name: s.name, email: s.address || '—', role: '—', pin: '—', store: s.name, active: s.is_active ? 'YES' : 'NO' }));
+        const rows = [...userRows, ...storeRows];
+        if (format === 'csv') { const csv = ['type,name,email,role,pin,store,active', ...rows.map((r) => `${r.type},"${r.name}","${r.email}",${r.role},${r.pin},"${r.store}",${r.active}`)].join('\n'); res.setHeader('Content-Type', 'text/csv'); res.setHeader('Content-Disposition', 'attachment; filename=users-stores.csv'); return res.send(csv); }
+        if (format === 'pdf') return res.status(501).json({ error: 'PDF export not yet implemented' });
+        return res.json({ data: rows, columns: ['type', 'name', 'email', 'role', 'pin', 'store', 'active'] });
+      } catch (err) { console.error('users-stores report error:', err); return res.status(500).json({ error: 'Internal server error' }); }
+    }
+
     // ---- Reports: other reports (not yet implemented) ----
     if (path[0] === 'reports' && method === 'GET') {
       return res.status(404).json({ error: 'Report not yet implemented — coming soon' });
