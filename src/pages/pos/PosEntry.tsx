@@ -31,11 +31,16 @@ export default function PosEntry() {
   const [storeError, setStoreError] = useState<string | null>(null);
   const navigate = useNavigate();
 
+  function slugifyPos(name: string): string {
+    return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'store';
+  }
+
   useEffect(() => {
     const existingStoreId = sessionStorage.getItem('pos_store_id');
     if (existingStoreId) {
       const slug = sessionStorage.getItem('pos_tenant_slug') || 'store';
-      const storeRef = sessionStorage.getItem('pos_store_number') || existingStoreId.slice(0, 8);
+      const storeName = sessionStorage.getItem('pos_store_name');
+      const storeRef = storeName ? slugifyPos(storeName) : (sessionStorage.getItem('pos_store_number') || existingStoreId.slice(0, 8));
       navigate(`/pos/${encodeURIComponent(slug)}/${encodeURIComponent(storeRef)}/dashboard`, { replace: true });
     }
   }, [navigate]);
@@ -98,7 +103,8 @@ export default function PosEntry() {
         if (data.store_number) sessionStorage.setItem('pos_store_number', data.store_number);
         else if (data.user.assigned_store_id) sessionStorage.setItem('pos_store_number', data.user.assigned_store_id.slice(0, 8));
         const slug = data.tenant_slug || sessionStorage.getItem('pos_tenant_slug') || 'store';
-        const storeRef = data.store_number || data.user.assigned_store_id?.slice(0, 8) || data.user.assigned_store_id;
+        const storeNameRaw = data.user.assigned_store_name || sessionStorage.getItem('pos_store_name') || '';
+        const storeRef = storeNameRaw ? slugifyPos(storeNameRaw) : (data.store_number || data.user.assigned_store_id?.slice(0, 8) || data.user.assigned_store_id);
         // fallback fetch slug if not in response (backward compat)
         if (!data.tenant_slug && data.tenant_schema) {
           try {
@@ -189,7 +195,7 @@ export default function PosEntry() {
       const slug = selectedTenant?.slug || sessionStorage.getItem('pos_tenant_slug') || 'store';
       if (selectedTenant?.slug) sessionStorage.setItem('pos_tenant_slug', selectedTenant.slug);
       if (schema) sessionStorage.setItem('pos_tenant_schema', schema);
-      const storeRef = store.store_number || store.store_id.slice(0, 8);
+      const storeRef = slugifyPos(store.name);
       navigate(`/pos/${encodeURIComponent(slug)}/${encodeURIComponent(storeRef)}/dashboard`, { replace: true });
     } catch {
       setStoreError('Session expired, please re-enter PIN');

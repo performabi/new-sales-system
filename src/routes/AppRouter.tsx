@@ -293,7 +293,7 @@ export default function AppRouter() {
         <Route path="/loyalty/:slug/register" element={<LoyaltyRegisterWithSlug />} />
 
         <Route
-          path="/pos/:slug/:storeRef"
+          path="/pos/:slug/:storename"
           element={<TerminalLayout />}
         >
           <Route index element={<Navigate to="dashboard" replace />} />

@@ -3,7 +3,7 @@ import { Outlet, useNavigate, useLocation, useParams } from 'react-router-dom';
 import ToastContainer from '../UI/ToastContainer';
 import { useThemeStore } from '../../store/themeStore';
 import { useAuthStore } from '../../store/authStore';
-import { buildPosUrl, clearPosSession } from '../../lib/posUrl';
+import { buildPosUrl, clearPosSession, slugify } from '../../lib/posUrl';
 import './TerminalLayout.css';
 
 const NAV_ITEMS = [
@@ -42,6 +42,8 @@ export default function TerminalLayout() {
   useEffect(() => {
     const slugParam = (params as any)?.slug as string | undefined;
     const storeRefParam = (params as any)?.storeRef as string | undefined;
+    const storenameParam = (params as any)?.storename as string | undefined;
+    const rawStoreParam = (storenameParam || storeRefParam) as string | undefined;
     const id = getPosStoreId();
     setStoreId(id);
     if (!id) {
@@ -49,30 +51,31 @@ export default function TerminalLayout() {
       return;
     }
     const slug = sessionStorage.getItem('pos_tenant_slug');
-    const storeRef = sessionStorage.getItem('pos_store_number') || id.slice(0, 8);
-    // Legacy URL without slug/storeRef -> redirect to canonical
-    if (!slugParam || !storeRefParam) {
+    const storeName = sessionStorage.getItem('pos_store_name') || '';
+    const expectedStorename = storeName ? slugify(storeName) : (sessionStorage.getItem('pos_store_number') || id.slice(0, 8));
+    // Legacy URL without slug/storename -> redirect to canonical
+    if (!slugParam || !rawStoreParam) {
       const suffix = location.pathname.replace(/^\/pos/, '') || '/dashboard';
-      // avoid redirect loop when already at /pos/dashboard without params but we have session
-      if (slug && storeRef) {
-        navigate(`/pos/${encodeURIComponent(slug)}/${encodeURIComponent(storeRef)}${suffix}`, { replace: true });
+      if (slug && expectedStorename) {
+        navigate(`/pos/${encodeURIComponent(slug)}/${encodeURIComponent(expectedStorename)}${suffix}`, { replace: true });
       }
       document.title = `Terminal — ${getPosStoreName()}`;
       return;
     }
     // New URL: validate mismatch -> auto-correct to canonical (token is truth)
     if (slug && slugParam !== slug) {
-      const suffix = location.pathname.replace(new RegExp(`^/pos/${slugParam}/${storeRefParam}`), '');
-      navigate(`/pos/${encodeURIComponent(slug)}/${encodeURIComponent(storeRef)}${suffix || '/dashboard'}`, { replace: true });
+      const suffix = location.pathname.replace(new RegExp(`^/pos/${slugParam}/${rawStoreParam}`), '');
+      navigate(`/pos/${encodeURIComponent(slug)}/${encodeURIComponent(expectedStorename)}${suffix || '/dashboard'}`, { replace: true });
       return;
     }
-    if (storeRef && storeRefParam !== storeRef) {
-      const suffix = location.pathname.replace(new RegExp(`^/pos/${slugParam}/${storeRefParam}`), '');
-      navigate(`/pos/${encodeURIComponent(slugParam)}/${encodeURIComponent(storeRef)}${suffix || '/dashboard'}`, { replace: true });
+    const decodedStore = rawStoreParam ? decodeURIComponent(rawStoreParam) : '';
+    if (expectedStorename && decodedStore.toLowerCase() !== expectedStorename.toLowerCase() && slugify(decodedStore) !== expectedStorename) {
+      const suffix = location.pathname.replace(new RegExp(`^/pos/${slugParam}/${rawStoreParam}`), '');
+      navigate(`/pos/${encodeURIComponent(slugParam)}/${encodeURIComponent(expectedStorename)}${suffix || '/dashboard'}`, { replace: true });
       return;
     }
-    document.title = `Terminal — ${getPosStoreName()}${slug ? ` · ${slug}` : ''}${storeRef ? ` · ${storeRef}` : ''}`;
-  }, [navigate, location.pathname, (params as any)?.slug, (params as any)?.storeRef]);
+    document.title = `Terminal — ${getPosStoreName()}${slug ? ` · ${slug}` : ''}${expectedStorename ? ` · ${expectedStorename}` : ''}`;
+  }, [navigate, location.pathname, (params as any)?.slug, (params as any)?.storeRef, (params as any)?.storename]);
 
   useEffect(() => {
     const el = document.documentElement;
@@ -89,13 +92,13 @@ export default function TerminalLayout() {
 
   const storeName = getPosStoreName();
   const slug = sessionStorage.getItem('pos_tenant_slug') || (params as any)?.slug || '';
-  const storeRefDisplay = sessionStorage.getItem('pos_store_number') || storeId.slice(0, 8);
+  const storeRefDisplay = storeName !== 'Store' ? slugify(storeName) : (sessionStorage.getItem('pos_store_number') || storeId.slice(0, 8));
   const isTillPage = location.pathname.endsWith('/till');
 
   const posNavPath = (path: string) => {
     const suffix = path.replace(/^\/pos/, '') || '/dashboard';
     const s = sessionStorage.getItem('pos_tenant_slug') || (params as any)?.slug || '';
-    const r = sessionStorage.getItem('pos_store_number') || storeId.slice(0, 8);
+    const r = storeName !== 'Store' ? slugify(storeName) : (sessionStorage.getItem('pos_store_number') || storeId.slice(0, 8));
     if (!s || !r) return path;
     return buildPosUrl(s, r, suffix);
   };

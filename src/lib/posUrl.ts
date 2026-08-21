@@ -12,17 +12,31 @@ export function getPosStoreId(): string | null {
   return storeId && token ? storeId : null;
 }
 
+export function slugify(name: string): string {
+  return name.toLowerCase().trim().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '') || 'store';
+}
+
 export function getPosStoreRef(): string {
+  const name = sessionStorage.getItem('pos_store_name');
+  if (name) return slugify(name);
   const num = getPosStoreNumber();
-  const id = getPosStoreId();
   if (num) return num;
+  const id = getPosStoreId();
   if (id) return id.slice(0, 8);
   return 'store';
 }
 
-export function buildPosUrl(slug: string | null, storeRef: string | null, suffix: string): string {
+export function getPosStoreNameSlug(): string | null {
+  const name = sessionStorage.getItem('pos_store_name');
+  return name ? slugify(name) : null;
+}
+
+export function buildPosUrl(slug: string | null, storename: string | null, suffix: string): string {
   const s = slug || getPosTenantSlug() || 'store';
-  const r = storeRef || getPosStoreRef();
+  let r = storename;
+  if (!r) r = getPosStoreRef();
+  else if (/\s/.test(r)) r = slugify(r);
+  else r = slugify(decodeURIComponent(r));
   const base = `/pos/${encodeURIComponent(s)}/${encodeURIComponent(r)}`;
   if (!suffix || suffix === '/') return `${base}/dashboard`;
   return `${base}${suffix.startsWith('/') ? suffix : `/${suffix}`}`;
