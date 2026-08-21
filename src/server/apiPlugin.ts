@@ -2884,28 +2884,36 @@ export function apiPlugin(): Plugin {
           const dateFrom = (req.query.date_from as string) || '';
           const dateTo = (req.query.date_to as string) || '';
           const supabaseAdmin = getSupabaseAdmin(server);
-          let q = supabaseAdmin.from('purchase_orders').select('po_id, po_number, status, total_cost, created_at, delivered_date, received_at, expected_delivery_date, store_id, supplier_id, suppliers(name), stores(name)');
+          let q = supabaseAdmin.from('purchase_orders').select('po_id, po_number, status, total_cost, created_at, delivered_date, received_at, expected_delivery_date, store_id, supplier_id, suppliers(name), stores(name), purchase_order_items(quantity_ordered, quantity_received)');
           if (storeId) q = (q as any).eq('store_id', storeId);
           if (dateFrom) q = (q as any).gte('created_at', dateFrom + 'T00:00:00Z');
           if (dateTo) q = (q as any).lte('created_at', dateTo + 'T23:59:59.999Z');
           const { data, error } = await q.order('created_at', { ascending: false });
           if (error) return res.status(400).json({ error: error.message });
-          const rows = ((data as any[]) ?? []).map((po: any) => ({
-            po_number: po.po_number,
-            supplier: po.suppliers?.name || '—',
-            store: po.stores?.name || po.store_id?.slice(0, 8) || '—',
-            status: po.status,
-            total_cost: po.total_cost,
-            expected_delivery: po.expected_delivery_date || '—',
-            delivered_date: po.delivered_date || '—',
-            created_at: po.created_at ? new Date(po.created_at).toISOString().slice(0, 10) : '—',
-          }));
+          const rows = ((data as any[]) ?? []).map((po: any) => {
+            const items = po.purchase_order_items ?? [];
+            const qtyOrdered = items.reduce((s: number, it: any) => s + (Number(it.quantity_ordered) || 0), 0);
+            const qtyReceived = items.reduce((s: number, it: any) => s + (Number(it.quantity_received) || 0), 0);
+            return {
+              po_number: po.po_number,
+              supplier: po.suppliers?.name || '—',
+              store: po.stores?.name || po.store_id?.slice(0, 8) || '—',
+              status: po.status,
+              total_cost: po.total_cost,
+              qty_ordered: Number(qtyOrdered.toFixed(3)),
+              qty_received: Number(qtyReceived.toFixed(3)),
+              shortage: Number((qtyOrdered - qtyReceived).toFixed(3)),
+              expected_delivery: po.expected_delivery_date || '—',
+              delivered_date: po.delivered_date || '—',
+              created_at: po.created_at ? new Date(po.created_at).toISOString().slice(0, 10) : '—',
+            };
+          });
           if (format === 'csv') {
-            const csv = ['po_number,supplier,store,status,total_cost,expected_delivery,delivered_date,created_at', ...rows.map((r) => `${r.po_number},"${r.supplier}","${r.store}",${r.status},${r.total_cost},${r.expected_delivery},${r.delivered_date},${r.created_at}`)].join('\n');
+            const csv = ['po_number,supplier,store,status,total_cost,qty_ordered,qty_received,shortage,expected_delivery,delivered_date,created_at', ...rows.map((r) => `${r.po_number},"${r.supplier}","${r.store}",${r.status},${r.total_cost},${r.qty_ordered},${r.qty_received},${r.shortage},${r.expected_delivery},${r.delivered_date},${r.created_at}`)].join('\n');
             return res.set({ 'Content-Type': 'text/csv', 'Content-Disposition': 'attachment; filename=purchase-orders.csv' }).send(csv);
           }
           if (format === 'pdf') return res.status(501).json({ error: 'PDF export not yet implemented' });
-          return res.json({ data: rows, columns: ['po_number', 'supplier', 'store', 'status', 'total_cost', 'expected_delivery', 'delivered_date', 'created_at'] });
+          return res.json({ data: rows, columns: ['po_number', 'supplier', 'store', 'status', 'total_cost', 'qty_ordered', 'qty_received', 'shortage', 'expected_delivery', 'delivered_date', 'created_at'] });
         } catch (err) { console.error('purchase-orders report error:', err); return res.status(500).json({ error: 'Internal server error' }); }
       });
 
