@@ -5,6 +5,7 @@ import { apiFetch } from '../../lib/api';
 import { deviceManager } from '../../devices/DeviceManager';
 import { buildReceiptLines } from '../../devices/escpos';
 import { round2, qtyPriceTotal, moneySum } from '../../lib/math';
+import { buildPosUrl } from '../../lib/posUrl';
 import CategoryBar from '../../components/Pos/CategoryBar';
 import PluGrid from '../../components/Pos/PluGrid';
 import ScanInput from '../../components/Pos/ScanInput';
@@ -354,11 +355,11 @@ export default function Till() {
                 style={{
                   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '2px',
                   padding: '4px 12px', borderRadius: '8px', fontSize: '0.7rem',
-                  color: location.pathname === item.path ? 'var(--primary)' : 'var(--text-muted)',
-                  fontWeight: location.pathname === item.path ? 600 : 400,
+                  color: (location.pathname === item.path || location.pathname === buildPosUrl(null, null, item.path.replace(/^\/pos/, ''))) ? 'var(--primary)' : 'var(--text-muted)',
+                  fontWeight: (location.pathname === item.path || location.pathname === buildPosUrl(null, null, item.path.replace(/^\/pos/, ''))) ? 600 : 400,
                   border: 'none', background: 'none', cursor: 'pointer',
                 }}
-                onClick={() => navigate(item.path)}
+                onClick={() => navigate(buildPosUrl(null, null, item.path.replace(/^\/pos/, '')))}
               >
                 <span style={{ fontSize: '1.2rem' }}>{item.icon}</span>
                 <span style={{ fontSize: '0.65rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>

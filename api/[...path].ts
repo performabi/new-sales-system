@@ -759,14 +759,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       // Standard-user path: scan active tenants for a matching user PIN
-      const { data: tenants } = await supabasePublic.from('tenants').select('schema_name, name').eq('is_active', true);
+      const { data: tenants } = await supabasePublic.from('tenants').select('schema_name, slug, name').eq('is_active', true);
       for (const tenant of tenants || []) {
         const schema = tenant.schema_name;
+        const tenantSlug = (tenant as any).slug || null;
         const tenantName = tenant.name;
         const tenantAdmin = getSupabaseAdmin(schema);
         const { data: users } = await tenantAdmin
           .from('users')
-          .select('user_id, username, full_name, role, pin_hash, is_active, assigned_store_id, stores!assigned_store_id(name)')
+          .select('user_id, username, full_name, role, pin_hash, is_active, assigned_store_id, stores!assigned_store_id(name, store_number)')
           .eq('is_active', true);
         if (!users || users.length === 0) continue;
         const user = users.find((u: any) => verifyPin(String(pin), u.pin_hash).ok);
@@ -810,6 +811,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
         return res.json({
           kind: 'user',
+          tenant_slug: tenantSlug,
+          tenant_schema: schema,
+          store_number: (user.stores as any)?.store_number || null,
           user: {
             user_id: user.user_id,
             username: user.username,

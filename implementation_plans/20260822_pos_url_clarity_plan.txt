@@ -1,0 +1,71 @@
+================================================================================
+2026-08-22 IMPLEMENTATION PLAN — POS URL Clarity (tenant slug + store in URL)
+================================================================================
+
+Status legend: [ ] = not started   [~] = in progress   [x] = done   [!] = blocked
+
+Objective: Make POS terminal URL show tenant slug + store (e.g. /pos/test_company/store_001/till)
+so staff recognise which tenant/store they operate in. POS is already tenanted (JWT pos_token + pos_store_id
+in sessionStorage) but URL is blind (/pos/till). No API break, no schema migration; URL is display-only,
+token remains source of truth.
+
+Design: /pos/:slug/:storeRef/*  where :slug = tenants.slug, :storeRef = stores.store_number (if present)
+else 8-char store_id. Legacy /pos/* kept as redirect to canonical URL. Validation: URL slug/store must
+match token's tenant/store; mismatch auto-corrects to token's canonical URL (prevents spoofing).
+
+===============================================================================
+PHASE P1 — Server: expose slug + store_number on pin-login (both API copies)
+===============================================================================
+[x] P1.1 api/[...path].ts pin-login tenant query: select schema_name, slug, name (was schema_name, name)
+[x] P1.2 api/[...path].ts pin-login user select: stores!assigned_store_id(name, store_number) (was name)
+[x] P1.3 api/[...path].ts pin-login user response: include tenant_slug, tenant_schema, store_number
+        kind: 'user' -> { tenant_slug, tenant_schema, store_number }
+        (fallback client can still fetch /api/app/tenant-info?tenant_schema=  if missing)
+
+===============================================================================
+PHASE P2 — Client: store slug/store_number and navigate to canonical URL
+===============================================================================
+[x] P2.1 PosEntry.tsx: after pin-login success, persist pos_tenant_slug, pos_tenant_schema,
+        pos_store_number in sessionStorage; add helper buildPosUrl(slug, storeRef, suffix)
+        and canonicalize (store_number || assigned_store_id.slice(0,8) || store_id).
+        Admin flow: after admin-finalize, same; Tenant picker: store slug from tenants[].slug.
+        Existing session check (useEffect) now resolves canonical URL and redirects.
+        All navigate('/pos/dashboard') -> navigate(buildPosUrl(...,'/dashboard')).
+[x] P2.2 TerminalLayout.tsx: read useParams<{slug, storeRef}>; validate against sessionStorage;
+        display "🏪 {storeName} · {slug} · {store_number}" in header subtitle; bottom nav
+        navigate via buildPosUrl; Change Store clears slug/number as well; title includes slug/store.
+
+===============================================================================
+PHASE P3 — Router: add slug/storeRef routes + legacy redirect
+===============================================================================
+[x] P3.1 AppRouter.tsx: add new route <Route path="/pos/:slug/:storeRef" element={<TerminalLayout />}>
+        with children dashboard, till, transactions, clock, checklists, goods-in.
+        Keep legacy <Route path="/pos" element={<TerminalLayout />}> for redirect.
+        Add PosLegacyRedirect component: if session exists -> fetch slug (sessionStorage.pos_tenant_slug
+        || /api/app/tenant-info) + storeRef (pos_store_number || store_id.slice(0,8)) -> Navigate to
+        canonical; else -> /pos/access. Also handle direct access /pos/:slug/:storeRef/* with no session
+        -> redirect to /pos/access.
+[x] P3.2 AppRouter.tsx: LoyaltyRegisterWithSlug already present; no change.
+
+===============================================================================
+PHASE P4 — Verification
+===============================================================================
+[ ] P4.1 tsc -b + vite build green
+[ ] P4.2 Staff PIN (role=user): login -> URL /pos/<slug>/<store_number>/dashboard, Till → URL preserves slug/storeRef,
+        refresh preserves, Change Store clears and returns to /pos/access, re-login shows new store in URL
+[ ] P4.3 Admin PIN: tenant picker -> store picker -> canonical URL with chosen slug/store
+[ ] P4.4 Direct URL: paste canonical URL with no session -> /pos/access; with session of different store -> auto-correct or warn
+[ ] P4.5 Legacy bookmark /pos/till -> redirect to canonical if session exists
+
+===============================================================================
+NOTES
+===============================================================================
+- No DB migration. No new API endpoint; only augmented existing pin-login response. Fallback fetch via
+  /api/app/tenant-info (already public) if tenant_slug missing.
+- URL is display-only; server validation via X-POS-Token (payload.schema + store_id) remains authoritative.
+- store_number is tenant-scoped (e.g. store_001) — human readable; if missing, 8-char store_id used.
+- All file changes parity: server dev apiPlugin.ts already proxies to same handler? Only Vercel file api/[...path].ts
+  needs the pin-login change; dev server uses Vite plugin which imports same logic? Actually pin-login is only in
+  api/[...path].ts (Vercel) and src/server/apiPlugin.ts dev copy — ensure both copies patched (check).
+
+(End of file)

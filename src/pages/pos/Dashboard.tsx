@@ -2,6 +2,7 @@ import { useNavigate } from 'react-router-dom';
 import PinPrompt from '../../components/Pos/PinPrompt';
 import { useState } from 'react';
 import { useAppStore } from '../../store/appStore';
+import { buildPosUrl } from '../../lib/posUrl';
 
 export default function PosDashboard() {
   const navigate = useNavigate();
@@ -11,7 +12,7 @@ export default function PosDashboard() {
 
   const handleNewSale = (user: any) => {
     openNewBasket(user.user_id, user.full_name);
-    navigate('/pos/till');
+    navigate(buildPosUrl(null, null, '/till'));
   };
 
   return (
@@ -30,19 +31,19 @@ export default function PosDashboard() {
           <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '4px' }}>Open the till to process transactions</p>
         </div>
 
-        <div className="card" style={{ textAlign: 'center', padding: '32px', cursor: 'pointer' }} onClick={() => navigate('/pos/goods-in')}>
+        <div className="card" style={{ textAlign: 'center', padding: '32px', cursor: 'pointer' }} onClick={() => navigate(buildPosUrl(null, null, '/goods-in'))}>
           <div style={{ fontSize: '3rem', marginBottom: '12px' }}>🚚</div>
           <h3>Goods In</h3>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '4px' }}>Confirm incoming purchase orders</p>
         </div>
 
-        <div className="card" style={{ textAlign: 'center', padding: '32px', cursor: 'pointer' }} onClick={() => navigate('/pos/clock')}>
+        <div className="card" style={{ textAlign: 'center', padding: '32px', cursor: 'pointer' }} onClick={() => navigate(buildPosUrl(null, null, '/clock'))}>
           <div style={{ fontSize: '3rem', marginBottom: '12px' }}>⏰</div>
           <h3>Clock In / Out</h3>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '4px' }}>Manage your shifts</p>
         </div>
 
-        <div className="card" style={{ textAlign: 'center', padding: '32px', cursor: 'pointer' }} onClick={() => navigate('/pos/checklists')}>
+        <div className="card" style={{ textAlign: 'center', padding: '32px', cursor: 'pointer' }} onClick={() => navigate(buildPosUrl(null, null, '/checklists'))}>
           <div style={{ fontSize: '3rem', marginBottom: '12px' }}>✅</div>
           <h3>Checklists</h3>
           <p style={{ color: 'var(--text-muted)', fontSize: '0.85rem', marginTop: '4px' }}>Complete day start / end tasks</p>

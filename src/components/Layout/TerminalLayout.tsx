@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { Outlet, useNavigate, useLocation, useParams } from 'react-router-dom';
 import ToastContainer from '../UI/ToastContainer';
 import { useThemeStore } from '../../store/themeStore';
 import { useAuthStore } from '../../store/authStore';
+import { buildPosUrl, clearPosSession } from '../../lib/posUrl';
 import './TerminalLayout.css';
 
 const NAV_ITEMS = [
@@ -31,6 +32,7 @@ function getPosUserName() {
 export default function TerminalLayout() {
   const navigate = useNavigate();
   const location = useLocation();
+  const params = useParams<{ slug?: string; storeRef?: string }>();
   const [storeId, setStoreId] = useState<string | null>(getPosStoreId());
 
   const handleLogout = async () => {
@@ -38,13 +40,39 @@ export default function TerminalLayout() {
   };
 
   useEffect(() => {
-    document.title = 'Terminal';
+    const slugParam = (params as any)?.slug as string | undefined;
+    const storeRefParam = (params as any)?.storeRef as string | undefined;
     const id = getPosStoreId();
     setStoreId(id);
     if (!id) {
       navigate('/pos/select-store', { replace: true });
+      return;
     }
-  }, [navigate]);
+    const slug = sessionStorage.getItem('pos_tenant_slug');
+    const storeRef = sessionStorage.getItem('pos_store_number') || id.slice(0, 8);
+    // Legacy URL without slug/storeRef -> redirect to canonical
+    if (!slugParam || !storeRefParam) {
+      const suffix = location.pathname.replace(/^\/pos/, '') || '/dashboard';
+      // avoid redirect loop when already at /pos/dashboard without params but we have session
+      if (slug && storeRef) {
+        navigate(`/pos/${encodeURIComponent(slug)}/${encodeURIComponent(storeRef)}${suffix}`, { replace: true });
+      }
+      document.title = `Terminal — ${getPosStoreName()}`;
+      return;
+    }
+    // New URL: validate mismatch -> auto-correct to canonical (token is truth)
+    if (slug && slugParam !== slug) {
+      const suffix = location.pathname.replace(new RegExp(`^/pos/${slugParam}/${storeRefParam}`), '');
+      navigate(`/pos/${encodeURIComponent(slug)}/${encodeURIComponent(storeRef)}${suffix || '/dashboard'}`, { replace: true });
+      return;
+    }
+    if (storeRef && storeRefParam !== storeRef) {
+      const suffix = location.pathname.replace(new RegExp(`^/pos/${slugParam}/${storeRefParam}`), '');
+      navigate(`/pos/${encodeURIComponent(slugParam)}/${encodeURIComponent(storeRef)}${suffix || '/dashboard'}`, { replace: true });
+      return;
+    }
+    document.title = `Terminal — ${getPosStoreName()}${slug ? ` · ${slug}` : ''}${storeRef ? ` · ${storeRef}` : ''}`;
+  }, [navigate, location.pathname, (params as any)?.slug, (params as any)?.storeRef]);
 
   useEffect(() => {
     const el = document.documentElement;
@@ -60,25 +88,33 @@ export default function TerminalLayout() {
   if (!storeId) return null;
 
   const storeName = getPosStoreName();
-  const isTillPage = location.pathname === '/pos/till';
+  const slug = sessionStorage.getItem('pos_tenant_slug') || (params as any)?.slug || '';
+  const storeRefDisplay = sessionStorage.getItem('pos_store_number') || storeId.slice(0, 8);
+  const isTillPage = location.pathname.endsWith('/till');
+
+  const posNavPath = (path: string) => {
+    const suffix = path.replace(/^\/pos/, '') || '/dashboard';
+    const s = sessionStorage.getItem('pos_tenant_slug') || (params as any)?.slug || '';
+    const r = sessionStorage.getItem('pos_store_number') || storeId.slice(0, 8);
+    if (!s || !r) return path;
+    return buildPosUrl(s, r, suffix);
+  };
+
+  const isActive = (path: string) => location.pathname === path || location.pathname === posNavPath(path);
 
   return (
     <div className="terminal-layout">
       <header className="terminal-header">
         <div className="terminal-header-left">
           <span className="terminal-brand">🏪 {storeName}</span>
+          {slug && <span style={{ marginLeft: '8px', fontSize: '0.7rem', opacity: 0.7 }}>{slug} · {storeRefDisplay}</span>}
         </div>
         <div className="terminal-header-right">
           <button
             className="btn btn-ghost"
             style={{ fontSize: '0.75rem', padding: '4px 10px' }}
             onClick={() => {
-              sessionStorage.removeItem('pos_store_id');
-              sessionStorage.removeItem('pos_store_name');
-              sessionStorage.removeItem('pos_token');
-              sessionStorage.removeItem('pos_user_id');
-              sessionStorage.removeItem('pos_user_name');
-              sessionStorage.removeItem('pos_user_role');
+              clearPosSession();
               navigate('/pos/select-store', { replace: true });
             }}
           >
@@ -96,8 +132,8 @@ export default function TerminalLayout() {
           {NAV_ITEMS.map((item) => (
             <button
               key={item.path}
-              className={`terminal-nav-item ${location.pathname === item.path ? 'active' : ''}`}
-              onClick={() => navigate(item.path)}
+              className={`terminal-nav-item ${isActive(item.path) ? 'active' : ''}`}
+              onClick={() => navigate(posNavPath(item.path))}
             >
               <span className="terminal-nav-icon">{item.icon}</span>
               <span className="terminal-nav-label">{item.label}</span>

@@ -34,7 +34,9 @@ export default function PosEntry() {
   useEffect(() => {
     const existingStoreId = sessionStorage.getItem('pos_store_id');
     if (existingStoreId) {
-      navigate('/pos/dashboard', { replace: true });
+      const slug = sessionStorage.getItem('pos_tenant_slug') || 'store';
+      const storeRef = sessionStorage.getItem('pos_store_number') || existingStoreId.slice(0, 8);
+      navigate(`/pos/${encodeURIComponent(slug)}/${encodeURIComponent(storeRef)}/dashboard`, { replace: true });
     }
   }, [navigate]);
 
@@ -91,7 +93,27 @@ export default function PosEntry() {
         if (data.user.assigned_store_name) {
           sessionStorage.setItem('pos_store_name', data.user.assigned_store_name);
         }
-        navigate('/pos/dashboard', { replace: true });
+        if (data.tenant_slug) sessionStorage.setItem('pos_tenant_slug', data.tenant_slug);
+        if (data.tenant_schema) sessionStorage.setItem('pos_tenant_schema', data.tenant_schema);
+        if (data.store_number) sessionStorage.setItem('pos_store_number', data.store_number);
+        else if (data.user.assigned_store_id) sessionStorage.setItem('pos_store_number', data.user.assigned_store_id.slice(0, 8));
+        const slug = data.tenant_slug || sessionStorage.getItem('pos_tenant_slug') || 'store';
+        const storeRef = data.store_number || data.user.assigned_store_id?.slice(0, 8) || data.user.assigned_store_id;
+        // fallback fetch slug if not in response (backward compat)
+        if (!data.tenant_slug && data.tenant_schema) {
+          try {
+            const r = await fetch(`/api/app/tenant-info?tenant_schema=${encodeURIComponent(data.tenant_schema)}`);
+            if (r.ok) {
+              const t = await r.json();
+              if (t?.slug) {
+                sessionStorage.setItem('pos_tenant_slug', t.slug);
+                navigate(`/pos/${encodeURIComponent(t.slug)}/${encodeURIComponent(storeRef)}/dashboard`, { replace: true });
+                return;
+              }
+            }
+          } catch {}
+        }
+        navigate(`/pos/${encodeURIComponent(slug)}/${encodeURIComponent(storeRef)}/dashboard`, { replace: true });
       }
     } catch {
       setPinError('Network error');
@@ -163,7 +185,12 @@ export default function PosEntry() {
       sessionStorage.setItem('pos_store_id', data.user.assigned_store_id);
       sessionStorage.setItem('pos_store_name', data.user.assigned_store_name);
       if (store.store_number) sessionStorage.setItem('pos_store_number', store.store_number);
-      navigate('/pos/dashboard', { replace: true });
+      else sessionStorage.setItem('pos_store_number', store.store_id.slice(0, 8));
+      const slug = selectedTenant?.slug || sessionStorage.getItem('pos_tenant_slug') || 'store';
+      if (selectedTenant?.slug) sessionStorage.setItem('pos_tenant_slug', selectedTenant.slug);
+      if (schema) sessionStorage.setItem('pos_tenant_schema', schema);
+      const storeRef = store.store_number || store.store_id.slice(0, 8);
+      navigate(`/pos/${encodeURIComponent(slug)}/${encodeURIComponent(storeRef)}/dashboard`, { replace: true });
     } catch {
       setStoreError('Session expired, please re-enter PIN');
       sessionStorage.removeItem('pos_token');

@@ -293,6 +293,20 @@ export default function AppRouter() {
         <Route path="/loyalty/:slug/register" element={<LoyaltyRegisterWithSlug />} />
 
         <Route
+          path="/pos/:slug/:storeRef"
+          element={<TerminalLayout />}
+        >
+          <Route index element={<Navigate to="dashboard" replace />} />
+          <Route path="dashboard" element={<PosDashboard />} />
+          <Route path="till" element={<PosTill />} />
+          <Route path="transactions" element={<PosTransactions />} />
+          <Route path="clock" element={<PosClock />} />
+          <Route path="checklists" element={<PosChecklists />} />
+          <Route path="goods-in" element={<PosGoodsIn />} />
+          <Route path="*" element={<Navigate to="dashboard" replace />} />
+        </Route>
+
+        <Route
           path="/pos"
           element={<TerminalLayout />}
         >
