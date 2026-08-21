@@ -6,7 +6,7 @@ import { apiFetch } from '../../lib/api';
 import { formatCurrency } from '../../lib/formatCurrency';
 import StatsCard from '../../components/UI/StatsCard';
 
-type RangePreset = 'today' | '7d' | '30d' | 'custom';
+type RangePreset = 'today' | '7d' | '15d' | '30d' | 'custom';
 
 function dateString(d: Date): string {
   return d.toISOString().slice(0, 10);
@@ -32,6 +32,7 @@ export default function Dashboard() {
   const range = useMemo(() => {
     const end = new Date();
     if (preset === 'today') return { start: dateString(end), end: dateString(end) };
+    if (preset === '15d') return { start: dateString(new Date(Date.now() - 14 * 86400000)), end: dateString(end) };
     if (preset === '30d') return { start: dateString(new Date(Date.now() - 29 * 86400000)), end: dateString(end) };
     if (preset === 'custom') return { start: customStart || dateString(end), end: customEnd || dateString(end) };
     return { start: dateString(new Date(Date.now() - 6 * 86400000)), end: dateString(end) };
@@ -67,9 +68,28 @@ export default function Dashboard() {
     return { count, total };
   }, [sales]);
 
+  const paymentSplit = useMemo(() => {
+    const map = new Map<string, { count: number; revenue: number }>();
+    let totalTx = 0;
+    let totalRev = 0;
+    for (const tx of sales) {
+      if (tx.status === 'void') continue;
+      const raw = String(tx.payment_method || 'cash');
+      const method = raw === 'bank_transfer' ? 'transfer' : raw;
+      const ent = map.get(method) || { count: 0, revenue: 0 };
+      ent.count++;
+      ent.revenue += Number(tx.total_amount) || 0;
+      map.set(method, ent);
+      totalTx++;
+      totalRev += Number(tx.total_amount) || 0;
+    }
+    return { map, totalTx, totalRev };
+  }, [sales]);
+
   const rangeLabel =
     preset === 'today' ? 'Today'
       : preset === '7d' ? 'Last 7 days'
+      : preset === '15d' ? 'Last 15 days'
       : preset === '30d' ? 'Last 30 days'
       : 'Custom range';
 
@@ -90,6 +110,7 @@ export default function Dashboard() {
             <div style={{ display: 'flex', gap: '8px' }}>
               <button className={`btn btn-sm ${preset === 'today' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setPreset('today')}>Today</button>
               <button className={`btn btn-sm ${preset === '7d' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setPreset('7d')}>7 Days</button>
+              <button className={`btn btn-sm ${preset === '15d' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setPreset('15d')}>15 Days</button>
               <button className={`btn btn-sm ${preset === '30d' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setPreset('30d')}>30 Days</button>
               <button className={`btn btn-sm ${preset === 'custom' ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setPreset('custom')}>Custom</button>
             </div>
@@ -149,6 +170,27 @@ export default function Dashboard() {
           icon="💷"
           variant="primary"
         />
+      </div>
+
+      <div className="card" style={{ marginBottom: '20px' }}>
+        <h3>Payment Split ({rangeLabel})</h3>
+        {paymentSplit.totalTx === 0 ? (
+          <p style={{ color: 'var(--text-muted)', marginTop: '8px' }}>No transactions in this period</p>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: '12px', marginTop: '12px' }}>
+            {Array.from(paymentSplit.map.entries()).map(([method, vals]) => {
+              const pct = paymentSplit.totalTx ? ((vals.count / paymentSplit.totalTx) * 100).toFixed(1) : '0';
+              const revPct = paymentSplit.totalRev ? ((vals.revenue / paymentSplit.totalRev) * 100).toFixed(1) : '0';
+              return (
+                <div key={method} style={{ padding: '12px', border: '1px solid var(--border-light)', borderRadius: '8px', textAlign: 'center' }}>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>{method}</div>
+                  <div style={{ fontWeight: 700, marginTop: '4px' }}>{vals.count} tx • {pct}%</div>
+                  <div style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>{formatCurrency(vals.revenue)} • {revPct}%</div>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
 
       <div className="card">

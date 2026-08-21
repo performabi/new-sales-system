@@ -174,6 +174,7 @@ export default function Reporting() {
         <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <button className="btn btn-ghost btn-sm" onClick={() => preset(0)}>Today</button>
           <button className="btn btn-ghost btn-sm" onClick={() => preset(6)}>Last 7 Days</button>
+          <button className="btn btn-ghost btn-sm" onClick={() => preset(14)}>Last 15 Days</button>
           <button className="btn btn-ghost btn-sm" onClick={() => preset(29)}>Last 30 Days</button>
         </div>
       </div>

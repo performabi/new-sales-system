@@ -134,12 +134,12 @@ PHASES
 ===============================================================================
 
 PHASE 1 — Reports Page + Hero + Core 3 Reports (Sales Summary, Sales by PLU, Loyalty)
-[x] P1.1 Create /app/:slug/Reporting/Reports page with hero section — BUILT (Reporting.tsx 2026-08-21, hero filters, 10 cards, date presets 7/15/30 default 30)
+[x] P1.1 Create /app/:slug/Reporting/Reports page with hero section — BUILT (Reporting.tsx 2026-08-21, hero filters, 10 cards, date presets Today/7/15/30 default 30)
 [x] P1.2 Report list component with 10 report cards — BUILT (REPORTS[] shared in src/lib/reports.ts)
-[x] P1.3 API endpoints for 3 core reports (sales-summary, sales-by-plu, loyalty) — PARTIAL: sales-summary done (both server copies) + 404 stub for others
-[x] P1.4 HTML view with sortable/filterable tables — BUILT (Reporting.tsx table + summary cards, handles {data, columns, summary})
-[x] P1.5 CSV export for 3 reports — PARTIAL: sales-summary CSV done (both copies), others return 404 JSON
-[x] GATE: All 3 reports render HTML + CSV; tsc + build green — tsc -b green, vite build 775kB green (2026-08-21)
+[x] P1.3 API endpoints for 3 core reports (sales-summary, sales-by-plu, loyalty) — DONE (both server copies, html+csv, pdf 501 stub)
+[x] P1.4 HTML view with sortable/filterable tables — BUILT (Reporting.tsx table + summary cards, handles {data, columns, summary}, distinguishes No data vs Coming soon)
+[x] P1.5 CSV export for 3 reports — DONE (sales-summary + sales-by-plu + loyalty CSV, both copies)
+[x] GATE: All 3 reports render HTML + CSV; tsc + build green — tsc -b green, vite build 776kB green (2026-08-21)
 
 PHASE 2 — Remaining 7 Reports + PDF Export
 [ ] P2.1 API endpoints for 7 remaining reports (PO, Timesheets, Stock, COGS, Goods In, PLU List, Users-Stores List)
@@ -148,9 +148,9 @@ PHASE 2 — Remaining 7 Reports + PDF Export
 [ ] GATE: All 10 reports render HTML + CSV + PDF; tsc + build green
 
 PHASE 3 — Dashboard Highlights
-[ ] P3.1 Refactor /app/:slug/dashboard → 5 highlight cards + hero section
-[ ] P3.2 Dashboard API endpoint (/api/dashboard/stats)
-[ ] GATE: Dashboard loads with aggregated data; hero filters work
+[~] P3.1 Refactor /app/:slug/dashboard → 5 highlight cards + hero section — PARTIAL: Payment Split card added (client memo from /api/sales), hero now Today/7/15/30/Custom
+[ ] P3.2 Dashboard API endpoint (/api/dashboard/stats) — deferred (client aggregation used)
+[ ] GATE: Dashboard loads with aggregated data; hero filters work — Payment Split done, other highlights pending
 
 PHASE 4 — Polish & Integration
 [ ] P4.1 Dashboard → Reports navigation (click metric → pre-filtered report)

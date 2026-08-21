@@ -1649,6 +1649,117 @@ return res.json({ success: true, status: newStatus, delivered_date: effectiveDel
       }
     }
 
+    // ---- Reports: sales-by-plu ----
+    if (path[0] === 'reports' && path[1] === 'sales-by-plu' && method === 'GET') {
+      try {
+        const format = (req.query as any).format as string || 'html';
+        const storeId = (req.query as any).store_id as string;
+        const dateFrom = (req.query as any).date_from as string || '';
+        const dateTo = (req.query as any).date_to as string || '';
+        const round2 = (n: number) => Math.round(n * 100) / 100;
+        let q = supabaseAdmin.from('sales_transactions').select('transaction_id, sale_items(plu_id, plu_name, quantity, unit_price, total_price)').neq('status', 'void');
+        if (storeId) q = (q as any).eq('store_id', storeId);
+        if (dateFrom) q = (q as any).gte('created_at', dateFrom + 'T00:00:00Z');
+        if (dateTo) q = (q as any).lte('created_at', dateTo + 'T23:59:59.999Z');
+        const { data: txns, error } = await q;
+        if (error) return res.status(400).json({ error: error.message });
+        const map = new Map<string, { plu_id: string | null; plu_name: string; quantity: number; revenue: number; txSet: Set<string>; unitPriceSum: number; count: number }>();
+        for (const tx of (txns as any[]) ?? []) {
+          for (const si of (tx as any).sale_items ?? []) {
+            const key = si.plu_id || si.plu_name;
+            const ent = map.get(key) || { plu_id: si.plu_id || null, plu_name: si.plu_name, quantity: 0, revenue: 0, txSet: new Set<string>(), unitPriceSum: 0, count: 0 };
+            ent.quantity += Number(si.quantity) || 0;
+            ent.revenue += Number(si.total_price) || 0;
+            ent.txSet.add((tx as any).transaction_id);
+            ent.unitPriceSum += Number(si.unit_price) || 0;
+            ent.count++;
+            map.set(key, ent);
+          }
+        }
+        const pluIds = Array.from(map.values()).map((v) => v.plu_id).filter(Boolean) as string[];
+        const pluMap = new Map<string, string>();
+        if (pluIds.length) {
+          const { data: plus } = await supabaseAdmin.from('plu').select('plu_id, plu_number').in('plu_id', pluIds);
+          for (const p of (plus as any[]) ?? []) pluMap.set(p.plu_id, p.plu_number);
+        }
+        const rows = Array.from(map.values()).map((v) => ({ plu_number: v.plu_id ? pluMap.get(v.plu_id) || '—' : '—', plu_name: v.plu_name, quantity: Number(v.quantity.toFixed(3)), revenue: round2(v.revenue), transactions: v.txSet.size, avg_price: v.count ? round2(v.unitPriceSum / v.count) : 0 })).sort((a, b) => b.revenue - a.revenue);
+        if (format === 'csv') {
+          const csv = ['plu_number,plu_name,quantity,revenue,transactions,avg_price', ...rows.map((r) => `${r.plu_number},"${r.plu_name}",${r.quantity},${r.revenue},${r.transactions},${r.avg_price}`)].join('\n');
+          res.setHeader('Content-Type', 'text/csv');
+          res.setHeader('Content-Disposition', 'attachment; filename=sales-by-plu.csv');
+          return res.send(csv);
+        }
+        if (format === 'pdf') return res.status(501).json({ error: 'PDF export not yet implemented' });
+        return res.json({ data: rows, columns: ['plu_number', 'plu_name', 'quantity', 'revenue', 'transactions', 'avg_price'] });
+      } catch (err) {
+        console.error('sales-by-plu report error:', err);
+        return res.status(500).json({ error: 'Internal server error' });
+      }
+    }
+
+    // ---- Reports: loyalty ----
+    if (path[0] === 'reports' && path[1] === 'loyalty' && method === 'GET') {
+      try {
+        const format = (req.query as any).format as string || 'html';
+        const storeId = (req.query as any).store_id as string;
+        const dateFrom = (req.query as any).date_from as string || '';
+        const dateTo = (req.query as any).date_to as string || '';
+        const round2 = (n: number) => Math.round(n * 100) / 100;
+        let cardQ = supabaseAdmin.from('loyalty_cards').select('card_id, is_active, cashback_balance, created_at, store_id');
+        if (storeId) cardQ = (cardQ as any).eq('store_id', storeId);
+        const { data: cards, error: cardErr } = await cardQ;
+        if (cardErr) return res.status(400).json({ error: cardErr.message });
+        const cardArr = (cards as any[]) ?? [];
+        const cardsIssued = cardArr.length;
+        const activeCards = cardArr.filter((c) => c.is_active).length;
+        const outstanding = cardArr.reduce((s, c) => s + (Number(c.cashback_balance) || 0), 0);
+        let cardsInRange = cardsIssued;
+        if (dateFrom || dateTo) {
+          const from = dateFrom ? new Date(dateFrom + 'T00:00:00Z').getTime() : 0;
+          const to = dateTo ? new Date(dateTo + 'T23:59:59.999Z').getTime() : Infinity;
+          cardsInRange = cardArr.filter((c) => { const t = new Date(c.created_at).getTime(); return t >= from && t <= to; }).length;
+        }
+        let txQ = supabaseAdmin.from('sales_transactions').select('total_amount, discount_amount, cashback_earned, loyalty_card_id, status, created_at, store_id');
+        if (storeId) txQ = (txQ as any).eq('store_id', storeId);
+        if (dateFrom) txQ = (txQ as any).gte('created_at', dateFrom + 'T00:00:00Z');
+        if (dateTo) txQ = (txQ as any).lte('created_at', dateTo + 'T23:59:59.999Z');
+        const { data: txns, error: txErr } = await txQ;
+        if (txErr) return res.status(400).json({ error: txErr.message });
+        const txArr = (txns as any[]) ?? [];
+        const valid = txArr.filter((t) => t.status !== 'void');
+        const loyaltyTx = valid.filter((t) => t.loyalty_card_id);
+        const totalTx = valid.length;
+        const cashbackRedeemed = valid.reduce((s, t) => s + (Number(t.discount_amount) || 0), 0);
+        const cashbackEarned = valid.reduce((s, t) => s + (Number(t.cashback_earned) || 0), 0);
+        const loyaltyRevenue = loyaltyTx.reduce((s, t) => s + (Number(t.total_amount) || 0), 0);
+        const attachRate = totalTx ? (loyaltyTx.length / totalTx) * 100 : 0;
+        const rows = [
+          { metric: 'Cards Issued', value: cardsIssued },
+          { metric: 'Active Cards', value: activeCards },
+          { metric: 'Cards Issued (in range)', value: cardsInRange },
+          { metric: 'Outstanding Liability (£)', value: round2(outstanding) },
+          { metric: 'Total Transactions', value: totalTx },
+          { metric: 'Loyalty Transactions', value: loyaltyTx.length },
+          { metric: 'Attach Rate (%)', value: Number(attachRate.toFixed(1)) },
+          { metric: 'Cashback Redeemed (£)', value: round2(cashbackRedeemed) },
+          { metric: 'Cashback Earned (£)', value: round2(cashbackEarned) },
+          { metric: 'Net Cashback (£)', value: round2(cashbackEarned - cashbackRedeemed) },
+          { metric: 'Loyalty Revenue (£)', value: round2(loyaltyRevenue) },
+        ];
+        if (format === 'csv') {
+          const csv = ['metric,value', ...rows.map((r) => `${r.metric},${r.value}`)].join('\n');
+          res.setHeader('Content-Type', 'text/csv');
+          res.setHeader('Content-Disposition', 'attachment; filename=loyalty.csv');
+          return res.send(csv);
+        }
+        if (format === 'pdf') return res.status(501).json({ error: 'PDF export not yet implemented' });
+        return res.json({ data: rows, columns: ['metric', 'value'] });
+      } catch (err) {
+        console.error('loyalty report error:', err);
+        return res.status(500).json({ error: 'Internal server error' });
+      }
+    }
+
     // ---- Reports: other reports (not yet implemented) ----
     if (path[0] === 'reports' && method === 'GET') {
       return res.status(404).json({ error: 'Report not yet implemented — coming soon' });
