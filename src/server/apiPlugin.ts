@@ -2678,11 +2678,10 @@ export function apiPlugin(): Plugin {
           const supabaseAdmin = getSupabaseAdmin(server);
           let query = supabaseAdmin
             .from('sales_transactions')
-            .select('*, sale_items(*)')
-            .eq('status', 'completed');
+            .select('*, sale_items(*)');
 
           if (storeId) query = query.eq('store_id', storeId);
-          if (dateFrom) query = query.gte('created_at', dateFrom);
+          if (dateFrom) query = query.gte('created_at', dateFrom + 'T00:00:00Z');
           if (dateTo) query = query.lte('created_at', dateTo + 'T23:59:59.999Z');
 
           const { data: transactions, error } = await query;
@@ -2713,34 +2712,33 @@ export function apiPlugin(): Plugin {
 
           const avgTicket = txnCount > 0 ? totalRevenue / txnCount : 0;
 
-          const data = {
-            summary: {
-              total_revenue: round2(totalRevenue),
-              transaction_count: txnCount,
-              average_ticket: round2(avgTicket),
-              total_discount: round2(totalDiscount),
-              void_count: voidCount,
-            },
-            daily: Object.entries(daily)
-              .sort(([a], [b]) => a.localeCompare(b))
-              .map(([date, vals]) => ({
-                date,
-                revenue: round2(vals.revenue),
-                transactions: vals.count,
-              })),
+          const dailyRows = Object.entries(daily)
+            .sort(([a], [b]) => a.localeCompare(b))
+            .map(([date, vals]) => ({
+              date,
+              revenue: round2(vals.revenue),
+              transactions: vals.count,
+            }));
+
+          const summary = {
+            total_revenue: round2(totalRevenue),
+            transaction_count: txnCount,
+            average_ticket: round2(avgTicket),
+            total_discount: round2(totalDiscount),
+            void_count: voidCount,
           };
 
           if (format === 'csv') {
             const csv = [
               'Metric,Value',
-              `Total Revenue,${data.summary.total_revenue}`,
-              `Transaction Count,${data.summary.transaction_count}`,
-              `Average Ticket,${data.summary.average_ticket}`,
-              `Total Discount,${data.summary.total_discount}`,
-              `Void Count,${data.summary.void_count}`,
+              `Total Revenue,${summary.total_revenue}`,
+              `Transaction Count,${summary.transaction_count}`,
+              `Average Ticket,${summary.average_ticket}`,
+              `Total Discount,${summary.total_discount}`,
+              `Void Count,${summary.void_count}`,
               '',
               'Date,Revenue,Transactions',
-              ...data.daily.map((d) => `${d.date},${d.revenue},${d.transactions}`),
+              ...dailyRows.map((d) => `${d.date},${d.revenue},${d.transactions}`),
             ].join('\n');
             return res
               .set({
@@ -2750,11 +2748,20 @@ export function apiPlugin(): Plugin {
               .send(csv);
           }
 
-          return res.json({ data, columns: Object.keys(data.summary) });
+          if (format === 'pdf') {
+            return res.status(501).json({ error: 'PDF export not yet implemented' });
+          }
+
+          return res.json({ data: dailyRows, columns: ['date', 'revenue', 'transactions'], summary });
         } catch (err) {
           console.error('Sales summary report error:', err);
           return res.status(500).json({ error: 'Internal server error' });
         }
+      });
+
+      // ---- Reports: not yet implemented (other IDs) ----
+      app.get('/api/reports/:reportId', async (_req, res) => {
+        return res.status(404).json({ error: 'Report not yet implemented — coming soon' });
       });
 
       // ---- Admin: list tenants ----

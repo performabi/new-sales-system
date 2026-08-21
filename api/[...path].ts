@@ -1583,6 +1583,77 @@ return res.json({ success: true, status: newStatus, delivered_date: effectiveDel
       return res.json(data);
     }
 
+    // ---- Reports: list ----
+    if (path[0] === 'reports' && path[1] === 'list' && method === 'GET') {
+      const REPORTS = [
+        { id: 'sales-summary', title: 'Sales Summary', description: 'Total revenue, transactions, average ticket, discounts, refunds, voids grouped by day/week/month', category: 'Sales' },
+        { id: 'sales-by-plu', title: 'Sales by PLU', description: 'Quantity, revenue, discount % per PLU; top/bottom performers', category: 'Sales' },
+        { id: 'loyalty', title: 'Loyalty Performance', description: 'Cards issued, active cards, cashback earned/used/redeemed, discount totals', category: 'Loyalty' },
+        { id: 'purchase-orders', title: 'Purchase Orders', description: 'PO status, quantities ordered vs received, supplier performance (on-time %)', category: 'Purchasing' },
+        { id: 'timesheets', title: 'Timesheets (Clock In/Out)', description: 'Clock-in/out times, hours worked, overtime, missing punches, late/early flags', category: 'Staff' },
+        { id: 'stock', title: 'Stock / Inventory', description: 'Current stock, threshold, value, low-stock flag, stock movement (in/out)', category: 'Inventory' },
+        { id: 'cogs', title: 'COGS Report', description: 'COGS per PLU, gross margin, margin % (FIFO)', category: 'Financial' },
+        { id: 'goods-in', title: 'Goods In (Receiving)', description: 'Received quantities, received date, receiver, PO status, discrepancies', category: 'Inventory' },
+        { id: 'plu-list', title: 'PLU Master List', description: 'PLU ID, name, category, EAN, uses_scale, head-office price, per-store prices, active flag', category: 'Lists' },
+        { id: 'users-stores', title: 'Users & Stores List', description: 'Users: name, role, PIN status, assigned store, active; Stores: name, address, active', category: 'Lists' },
+      ];
+      return res.json(REPORTS);
+    }
+
+    // ---- Reports: sales-summary ----
+    if (path[0] === 'reports' && path[1] === 'sales-summary' && method === 'GET') {
+      try {
+        const format = (req.query as any).format as string || 'html';
+        const storeId = (req.query as any).store_id as string;
+        const dateFrom = (req.query as any).date_from as string || '';
+        const dateTo = (req.query as any).date_to as string || '';
+        const round2 = (n: number) => Math.round(n * 100) / 100;
+        let query = supabaseAdmin.from('sales_transactions').select('*, sale_items(*)');
+        if (storeId) query = (query as any).eq('store_id', storeId);
+        if (dateFrom) query = (query as any).gte('created_at', dateFrom + 'T00:00:00Z');
+        if (dateTo) query = (query as any).lte('created_at', dateTo + 'T23:59:59.999Z');
+        const { data: transactions, error } = await query;
+        if (error) return res.status(400).json({ error: error.message });
+        const txns = (transactions ?? []) as any[];
+        let totalRevenue = 0;
+        let txnCount = 0;
+        let totalDiscount = 0;
+        let voidCount = 0;
+        const daily: Record<string, { revenue: number; count: number }> = {};
+        for (const tx of txns) {
+          if (tx.status === 'void') { voidCount++; continue; }
+          const amount = Number(tx.total_amount) || 0;
+          const discount = Number(tx.discount_amount) || 0;
+          const created = new Date(tx.created_at).toISOString().slice(0, 10);
+          totalRevenue += amount;
+          totalDiscount += discount;
+          txnCount++;
+          if (!daily[created]) daily[created] = { revenue: 0, count: 0 };
+          daily[created].revenue += amount;
+          daily[created].count++;
+        }
+        const avgTicket = txnCount > 0 ? totalRevenue / txnCount : 0;
+        const dailyRows = Object.entries(daily).sort(([a], [b]) => a.localeCompare(b)).map(([date, vals]) => ({ date, revenue: round2(vals.revenue), transactions: vals.count }));
+        const summary = { total_revenue: round2(totalRevenue), transaction_count: txnCount, average_ticket: round2(avgTicket), total_discount: round2(totalDiscount), void_count: voidCount };
+        if (format === 'csv') {
+          const csv = ['Metric,Value', `Total Revenue,${summary.total_revenue}`, `Transaction Count,${summary.transaction_count}`, `Average Ticket,${summary.average_ticket}`, `Total Discount,${summary.total_discount}`, `Void Count,${summary.void_count}`, '', 'Date,Revenue,Transactions', ...dailyRows.map((d) => `${d.date},${d.revenue},${d.transactions}`)].join('\n');
+          res.setHeader('Content-Type', 'text/csv');
+          res.setHeader('Content-Disposition', 'attachment; filename=sales-summary.csv');
+          return res.send(csv);
+        }
+        if (format === 'pdf') return res.status(501).json({ error: 'PDF export not yet implemented' });
+        return res.json({ data: dailyRows, columns: ['date', 'revenue', 'transactions'], summary });
+      } catch (err) {
+        console.error('Sales summary report error:', err);
+        return res.status(500).json({ error: 'Internal server error' });
+      }
+    }
+
+    // ---- Reports: other reports (not yet implemented) ----
+    if (path[0] === 'reports' && method === 'GET') {
+      return res.status(404).json({ error: 'Report not yet implemented — coming soon' });
+    }
+
     // ---- Admin: list tenants ----
     if (path[0] === 'admin' && path[1] === 'tenants' && path.length === 2 && method === 'GET') {
       const { data: tenants } = await supabaseAdmin.from('tenants').select('*').order('created_at', { ascending: false });

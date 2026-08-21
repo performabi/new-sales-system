@@ -2,76 +2,7 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../../store/appStore';
 import { apiFetch } from '../../lib/api';
-
-interface Report {
-  id: string;
-  title: string;
-  description: string;
-  category: string;
-}
-
-const REPORTS: Report[] = [
-  {
-    id: 'sales-summary',
-    title: 'Sales Summary',
-    description: 'Total revenue, transactions, average ticket, discounts, refunds, voids grouped by day/week/month',
-    category: 'Sales'
-  },
-  {
-    id: 'sales-by-plu',
-    title: 'Sales by PLU',
-    description: 'Quantity, revenue, discount % per PLU; top/bottom performers',
-    category: 'Sales'
-  },
-  {
-    id: 'loyalty',
-    title: 'Loyalty Performance',
-    description: 'Cards issued, active cards, cashback earned/used/redeemed, discount totals',
-    category: 'Loyalty'
-  },
-  {
-    id: 'purchase-orders',
-    title: 'Purchase Orders',
-    description: 'PO status, quantities ordered vs received, supplier performance (on-time %)',
-    category: 'Purchasing'
-  },
-  {
-    id: 'timesheets',
-    title: 'Timesheets (Clock In/Out)',
-    description: 'Clock-in/out times, hours worked, overtime, missing punches, late/early flags',
-    category: 'Staff'
-  },
-  {
-    id: 'stock',
-    title: 'Stock / Inventory',
-    description: 'Current stock, threshold, value, low-stock flag, stock movement (in/out)',
-    category: 'Inventory'
-  },
-  {
-    id: 'cogs',
-    title: 'COGS Report',
-    description: 'COGS per PLU, gross margin, margin %',
-    category: 'Financial'
-  },
-  {
-    id: 'goods-in',
-    title: 'Goods In (Receiving)',
-    description: 'Received quantities, received date, receiver, PO status, discrepancies',
-    category: 'Inventory'
-  },
-  {
-    id: 'plu-list',
-    title: 'PLU Master List',
-    description: 'PLU ID, name, category, EAN, uses_scale, head-office price, per-store prices, active flag',
-    category: 'Lists'
-  },
-  {
-    id: 'users-stores',
-    title: 'Users & Stores List',
-    description: 'Users: name, role, PIN status, assigned store, active; Stores: name, address, active',
-    category: 'Lists'
-  },
-];
+import { REPORTS } from '../../lib/reports';
 
 function dateNDaysAgo(days: number): string {
   const d = new Date();
@@ -88,6 +19,8 @@ export default function Reporting() {
   const [selectedReportId, setSelectedReportId] = useState<string | null>(null);
   const [reportData, setReportData] = useState<any[]>([]);
   const [reportColumns, setReportColumns] = useState<string[]>([]);
+  const [reportSummary, setReportSummary] = useState<Record<string, any> | null>(null);
+  const [reportError, setReportError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [format, setFormat] = useState<'html' | 'csv' | 'pdf'>('html');
 
@@ -98,6 +31,8 @@ export default function Reporting() {
   const runReport = async () => {
     if (!selectedReportId) return;
     setLoading(true);
+    setReportError(null);
+    setReportSummary(null);
     try {
       let url = `/api/reports/${selectedReportId}?format=html`;
       if (storeId) url += `&store_id=${encodeURIComponent(storeId)}`;
@@ -105,11 +40,36 @@ export default function Reporting() {
       const res = await apiFetch(url);
       if (res.ok) {
         const data = await res.json();
-        setReportData(data.data ?? data ?? []);
-        setReportColumns(data.columns ?? (data.length > 0 ? Object.keys(data[0]) : []));
+        if (Array.isArray(data)) {
+          setReportData(data);
+          setReportColumns(data.length > 0 ? Object.keys(data[0]) : []);
+        } else if (data && typeof data === 'object') {
+          if (Array.isArray(data.data)) {
+            setReportData(data.data);
+            setReportColumns(data.columns ?? (data.data.length > 0 ? Object.keys(data.data[0]) : []));
+            if (data.summary) setReportSummary(data.summary);
+          } else if (data.summary && data.daily) {
+            // legacy shape fallback
+            setReportData(data.daily ?? []);
+            setReportColumns(data.daily?.length ? Object.keys(data.daily[0]) : []);
+            setReportSummary(data.summary);
+          } else {
+            setReportData([]);
+            setReportColumns([]);
+          }
+        }
+      } else {
+        const errBody = await res.json().catch(() => null);
+        if (res.status === 404) setReportError('This report is coming soon — endpoint not yet implemented.');
+        else setReportError(errBody?.error || `Request failed (${res.status})`);
+        setReportData([]);
+        setReportColumns([]);
       }
     } catch (err) {
       console.error('runReport error:', err);
+      setReportError('Network error');
+      setReportData([]);
+      setReportColumns([]);
     } finally {
       setLoading(false);
     }
@@ -234,16 +194,33 @@ export default function Reporting() {
               <div className="spinner" style={{ margin: '0 auto' }}></div>
               <p style={{ marginTop: '12px', color: 'var(--text-muted)' }}>Generating report…</p>
             </div>
+          ) : reportError ? (
+            <div className="card" style={{ padding: '48px', textAlign: 'center' }}>
+              <div style={{ fontSize: '2rem', marginBottom: '12px' }}>🚧</div>
+              <h3>Report unavailable</h3>
+              <p style={{ color: 'var(--text-muted)', marginTop: '8px' }}>{reportError}</p>
+            </div>
           ) : reportData.length === 0 ? (
             <div className="card" style={{ padding: '48px', textAlign: 'center' }}>
               <div style={{ fontSize: '2rem', marginBottom: '12px' }}>📭</div>
               <h3>No data found</h3>
               <p style={{ color: 'var(--text-muted)', marginTop: '8px' }}>
-                Try adjusting the date range or store filter.
+                No transactions in this period. Try adjusting the date range (e.g. Last 30 Days) or store filter.
               </p>
             </div>
           ) : (
-            <div className="card" style={{ overflow: 'auto' }}>
+            <>
+              {reportSummary && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+                  {Object.entries(reportSummary).map(([k, v]) => (
+                    <div key={k} className="card" style={{ padding: '16px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', textTransform: 'uppercase' }}>{k.replace(/_/g, ' ')}</div>
+                      <div style={{ fontSize: '1.4rem', fontWeight: 700, marginTop: '4px' }}>{String(v)}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className="card" style={{ overflow: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse' }}>
                 <thead>
                   <tr style={{ background: 'var(--bg-card-hover)', textAlign: 'left' }}>
@@ -267,6 +244,7 @@ export default function Reporting() {
               </tbody>
               </table>
             </div>
+            </>
           )}
         </div>
       ) : (

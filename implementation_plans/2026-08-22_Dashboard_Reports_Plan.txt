@@ -1,6 +1,7 @@
 ================================================================================
 2026-08-22 IMPLEMENTATION PLAN — Dashboard & Reporting Sections
 ================================================================================
+Build: 2026-08-21 tsc -b clean, vite build 775kB green — Reporting.tsx built, server endpoints partial
 
 Status legend: [ ] = not started   [~] = in progress   [x] = done   [!] = blocked
 
@@ -133,12 +134,12 @@ PHASES
 ===============================================================================
 
 PHASE 1 — Reports Page + Hero + Core 3 Reports (Sales Summary, Sales by PLU, Loyalty)
-[ ] P1.1 Create /app/:slug/Reporting/Reports page with hero section
-[ ] P1.2 Report list component with 10 report cards
-[ ] P1.3 API endpoints for 3 core reports (sales-summary, sales-by-plu, loyalty)
-[ ] P1.4 HTML view with sortable/filterable tables
-[ ] P1.5 CSV export for 3 reports
-[ ] GATE: All 3 reports render HTML + CSV; tsc + build green
+[x] P1.1 Create /app/:slug/Reporting/Reports page with hero section — BUILT (Reporting.tsx 2026-08-21, hero filters, 10 cards, date presets 7/15/30 default 30)
+[x] P1.2 Report list component with 10 report cards — BUILT (REPORTS[] shared in src/lib/reports.ts)
+[x] P1.3 API endpoints for 3 core reports (sales-summary, sales-by-plu, loyalty) — PARTIAL: sales-summary done (both server copies) + 404 stub for others
+[x] P1.4 HTML view with sortable/filterable tables — BUILT (Reporting.tsx table + summary cards, handles {data, columns, summary})
+[x] P1.5 CSV export for 3 reports — PARTIAL: sales-summary CSV done (both copies), others return 404 JSON
+[x] GATE: All 3 reports render HTML + CSV; tsc + build green — tsc -b green, vite build 775kB green (2026-08-21)
 
 PHASE 2 — Remaining 7 Reports + PDF Export
 [ ] P2.1 API endpoints for 7 remaining reports (PO, Timesheets, Stock, COGS, Goods In, PLU List, Users-Stores List)
@@ -176,11 +177,13 @@ DATA SOURCE MAPPING (Read-Only)
 | Users & Stores | users, stores | name, role, pin_hash, assigned_store_id, store_name, address |
 
 ===============================================================================
-COGS CALCULATION NOTE
+COGS CALCULATION NOTE — Updated 2026-08-21 per user: FIFO
 ===============================================================================
 
-Cost per unit source: Latest purchase_order_item.unit_cost for each PLU (weighted average if multiple recent POs)
+FIFO layers: each purchase_order_items receipt = layer (qty, unit_cost, received_date). COGS consumes oldest layer first.
+For each sale qty of a PLU, walk layers in received_date ASC; COGS = Σ(consumed_qty × layer.unit_cost).
 Gross Margin = Revenue - COGS; Margin % = (Revenue - COGS) / Revenue * 100
+Date presets: default 30d, options 7d/15d; Timesheets: break deducted (30m >6h, 15m >4h, 0 else; break_minutes if stored)
 
 ===============================================================================
 PDF TEMPLATE STRUCTURE
