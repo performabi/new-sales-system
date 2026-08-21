@@ -2800,7 +2800,7 @@ export function apiPlugin(): Plugin {
               quantity: Number(v.quantity.toFixed(3)),
               revenue: round2(v.revenue),
               transactions: v.txSet.size,
-              avg_price: v.count ? round2(v.unitPriceSum / v.count) : 0,
+              avg_price: v.quantity ? round2(v.revenue / v.quantity) : 0,
             }))
             .sort((a, b) => b.revenue - a.revenue);
           if (format === 'csv') {

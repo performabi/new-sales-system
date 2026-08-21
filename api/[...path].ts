@@ -1682,7 +1682,7 @@ return res.json({ success: true, status: newStatus, delivered_date: effectiveDel
           const { data: plus } = await supabaseAdmin.from('plu').select('plu_id, plu_number').in('plu_id', pluIds);
           for (const p of (plus as any[]) ?? []) pluMap.set(p.plu_id, p.plu_number);
         }
-        const rows = Array.from(map.values()).map((v) => ({ plu_number: v.plu_id ? pluMap.get(v.plu_id) || '—' : '—', plu_name: v.plu_name, quantity: Number(v.quantity.toFixed(3)), revenue: round2(v.revenue), transactions: v.txSet.size, avg_price: v.count ? round2(v.unitPriceSum / v.count) : 0 })).sort((a, b) => b.revenue - a.revenue);
+        const rows = Array.from(map.values()).map((v) => ({ plu_number: v.plu_id ? pluMap.get(v.plu_id) || '—' : '—', plu_name: v.plu_name, quantity: Number(v.quantity.toFixed(3)), revenue: round2(v.revenue), transactions: v.txSet.size, avg_price: v.quantity ? round2(v.revenue / v.quantity) : 0 })).sort((a, b) => b.revenue - a.revenue);
         if (format === 'csv') {
           const csv = ['plu_number,plu_name,quantity,revenue,transactions,avg_price', ...rows.map((r) => `${r.plu_number},"${r.plu_name}",${r.quantity},${r.revenue},${r.transactions},${r.avg_price}`)].join('\n');
           res.setHeader('Content-Type', 'text/csv');

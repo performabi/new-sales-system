@@ -22,7 +22,7 @@ export default function Reporting() {
   const [reportSummary, setReportSummary] = useState<Record<string, any> | null>(null);
   const [reportError, setReportError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  const [format, setFormat] = useState<'html' | 'csv' | 'pdf'>('html');
+  const [format, setFormat] = useState<'html' | 'csv'>('html');
 
   useEffect(() => {
     if (stores.length === 0) fetchStores();
@@ -107,6 +107,7 @@ export default function Reporting() {
   };
 
   const selectedReport = selectedReportId ? REPORTS.find((r) => r.id === selectedReportId) : null;
+  const isSnapshot = selectedReportId ? ['stock', 'plu-list', 'users-stores'].includes(selectedReportId) : false;
 
   return (
     <div className="page-content">
@@ -130,13 +131,20 @@ export default function Reporting() {
             </select>
           </div>
 
-          <div style={{ flex: '1 1 150px', minWidth: '150px' }}>
-            <label className="form-label">Date Range</label>
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <input className="form-input" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
-              <input className="form-input" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+          {!isSnapshot && (
+            <div style={{ flex: '1 1 150px', minWidth: '150px' }}>
+              <label className="form-label">Date Range</label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <input className="form-input" type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} />
+                <input className="form-input" type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} />
+              </div>
             </div>
-          </div>
+          )}
+          {isSnapshot && (
+            <div style={{ flex: '1 1 150px', minWidth: '150px', alignSelf: 'center', paddingTop: '18px', color: 'var(--text-muted)', fontSize: '0.85rem' }}>
+              Snapshot — not date-filtered
+            </div>
+          )}
 
           <div style={{ flex: '1 1 150px', minWidth: '150px' }}>
             <label className="form-label">Store</label>
@@ -153,7 +161,6 @@ export default function Reporting() {
             <select className="form-input" value={format} onChange={(e) => setFormat(e.target.value as any)}>
               <option value="html">HTML</option>
               <option value="csv">CSV</option>
-              <option value="pdf">PDF</option>
             </select>
           </div>
 
@@ -164,19 +171,18 @@ export default function Reporting() {
             <button className="btn btn-secondary" onClick={() => exportReport('csv')} disabled={!selectedReportId || loading || reportData.length === 0}>
               Export CSV
             </button>
-            <button className="btn btn-secondary" onClick={() => exportReport('pdf')} disabled={!selectedReportId || loading || reportData.length === 0}>
-              Export PDF
-            </button>
           </div>
         </div>
 
         {/* Quick Presets */}
-        <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <button className="btn btn-ghost btn-sm" onClick={() => preset(0)}>Today</button>
-          <button className="btn btn-ghost btn-sm" onClick={() => preset(6)}>Last 7 Days</button>
-          <button className="btn btn-ghost btn-sm" onClick={() => preset(14)}>Last 15 Days</button>
-          <button className="btn btn-ghost btn-sm" onClick={() => preset(29)}>Last 30 Days</button>
-        </div>
+        {!isSnapshot && (
+          <div style={{ marginTop: '12px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => preset(0)}>Today</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => preset(6)}>Last 7 Days</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => preset(14)}>Last 15 Days</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => preset(29)}>Last 30 Days</button>
+          </div>
+        )}
       </div>
 
       {/* Report List (when no report selected) or Report View */}
