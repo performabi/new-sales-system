@@ -237,8 +237,8 @@ export default function Faq() {
   const shownArticles = filtered.reduce((n, s) => n + s.articles.length, 0);
 
   return (
-    <div className="page-content">
-      <div className="page-header">
+    <div className="page-content" style={{ maxWidth: '960px', margin: '0 auto', padding: '2rem 1.5rem' }}>
+      <div className="page-header" style={{ marginBottom: '1.5rem' }}>
         <h1>FAQ & Support</h1>
         <p style={{ color: 'var(--text-muted)' }}>
           Help articles for the POS terminal and Head Office.
@@ -305,7 +305,7 @@ export default function Faq() {
         ))
       )}
 
-      <div className="card" style={{ textAlign: 'center', padding: '32px', marginTop: '8px' }}>
+      <div className="card" style={{ textAlign: 'center', padding: '32px', marginTop: '8px', marginBottom: '2rem' }}>
         <div style={{ fontSize: '2rem', marginBottom: '12px' }}>📧</div>
         <h3>Still need help?</h3>
         <p style={{ color: 'var(--text-muted)', marginTop: '8px', marginBottom: '16px' }}>
