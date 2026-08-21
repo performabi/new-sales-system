@@ -277,7 +277,7 @@ export default function Faq() {
             </h3>
             {section.articles.map((article, idx) => (
               <details
-                key={idx}
+                key={`${section.id}-${idx}`}
                 style={{
                   borderBottom: '1px solid var(--border-medium)',
                   padding: '10px 0',
