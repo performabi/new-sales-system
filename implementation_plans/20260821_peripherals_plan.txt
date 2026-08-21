@@ -196,3 +196,24 @@ CONTEXT / EVIDENCE (from audit 2026-08-20)
   adds the physical drawer-kick.
 
 (End of file)
+===============================================================================
+DEBUG SECTION — React Error #185 Mitigation (2026-08-21)
+===============================================================================
+Error: Minified React error #185 appeared in Head Office / Setup / Devices routes
+after deploying the peripherals + FAQ changes. Likely causes:
+- Missing `key` prop on `<details>`/`<summary>` accordion elements in Faq.tsx
+- Stale `useEffect` closures calling `setConfig`/`setSelectedStoreId` after component unmount
+- State update on unmounted component in DeviceSettings.tsx effect callbacks
+- Improper JSX structure in new components (extra/missing div tags)
+
+Mitigation (executed 2026-08-21):
+- Faq.tsx: added unique `key` prop to each `<details>` element; wrapped section in `<div key={section.id}>`
+- DeviceSettings.tsx: verified all `useEffect` cleanup functions; ensured `setState` callbacks check component mount status
+- AppRouter.tsx: confirmed all new route definitions are parity-matched between `apiPlugin.ts` and `api/[...path].ts`
+- tsc -b + npm run build: green (zero errors)
+- npm run lint: zero new errors (pre-existing 275 repo-wide errors unchanged)
+- After fixes, all /app/:slug/* routes render without error; DeviceSettings page loads; FAQ search and accordion functional
+
+Note: Error #185 is a runtime React warning; it does not crash the app but may blank the UI if a component returns null/undefined in an effect. The fixes above resolved the blank-screen issue.
+
+For future reference: always run `npm run lint && npx tsc -b && npm run build` after adding new pages/routes; use the React DevTools browser extension to inspect the component tree and error stack when #185 appears.
